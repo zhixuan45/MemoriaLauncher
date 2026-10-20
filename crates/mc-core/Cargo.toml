@@ -1,0 +1,15 @@
+[package]
+name = "mc-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core domain models, services, and task definitions for MC AI Launcher"
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,20 @@
+# Rust 编译产物
+/target/
+**/*.rs.bk
+
+# 游戏实例与本地数据运行目录
+instances/
+cache/
+logs/
+.minecraft/
+
+# IDE 与编辑器配置
+.idea/
+.vscode/
+*.swp
+*.iml
+
+# 操作系统临时文件
+Thumbs.db
+Desktop.ini
+.DS_Store

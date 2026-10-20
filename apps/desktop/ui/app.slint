@@ -1,0 +1,153 @@
+import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export struct InstanceItem {
+    id: string,
+    name: string,
+    mc_version: string,
+    loader: string,
+}
+
+export component MainWindow inherits Window {
+    title: "MC AI Launcher";
+    min-width: 800px;
+    min-height: 520px;
+    background: #18181b;
+
+    in property <[InstanceItem]> instances: [];
+    in property <string> status_text: "就绪";
+    callback refresh_clicked();
+    callback create_instance_clicked();
+
+    HorizontalBox {
+        padding: 0px;
+        spacing: 0px;
+
+        // 左侧侧边栏
+        Rectangle {
+            width: 200px;
+            background: #27272a;
+
+            VerticalBox {
+                padding: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "MC AI Launcher";
+                    color: #fafafa;
+                    font-size: 18px;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: "阶段 0 原生骨架";
+                    color: #a1a1aa;
+                    font-size: 12px;
+                }
+
+                Rectangle { height: 16px; }
+
+                Button {
+                    text: "游戏实例";
+                    primary: true;
+                }
+
+                Button {
+                    text: "下载游戏";
+                }
+
+                Button {
+                    text: "Mod 中心";
+                }
+
+                Button {
+                    text: "任务与日志";
+                }
+
+                Rectangle { } // 弹性占位空间
+
+                Text {
+                    text: root.status_text;
+                    color: #a1a1aa;
+                    font-size: 12px;
+                }
+            }
+        }
+
+        // 右侧内容区
+        Rectangle {
+            background: #18181b;
+
+            VerticalBox {
+                padding: 24px;
+                spacing: 16px;
+
+                HorizontalBox {
+                    padding: 0px;
+                    Text {
+                        text: "实例管理";
+                        color: #fafafa;
+                        font-size: 20px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle { }
+
+                    Button {
+                        text: "刷新列表";
+                        clicked => { root.refresh_clicked(); }
+                    }
+
+                    Button {
+                        text: "+ 创建新实例";
+                        primary: true;
+                        clicked => { root.create_instance_clicked(); }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: #3f3f46;
+                }
+
+                for item in root.instances: Rectangle {
+                    height: 72px;
+                    background: #27272a;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #3f3f46;
+
+                    HorizontalBox {
+                        padding: 16px;
+                        spacing: 16px;
+
+                        VerticalBox {
+                            padding: 0px;
+                            spacing: 4px;
+                            Text {
+                                text: item.name;
+                                color: #f4f4f5;
+                                font-size: 15px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: "Minecraft " + item.mc_version + " · " + item.loader;
+                                color: #a1a1aa;
+                                font-size: 12px;
+                            }
+                        }
+
+                        Rectangle { }
+
+                        Button {
+                            text: "启动游戏";
+                            primary: true;
+                        }
+                    }
+                }
+
+                Rectangle { }
+            }
+        }
+    }
+}

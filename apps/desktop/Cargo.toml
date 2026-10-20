@@ -1,0 +1,12 @@
+[package]
+name = "desktop"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mc-core = { workspace = true }
+tokio = { workspace = true }
+slint = "1.9"
+
+[build-dependencies]
+slint-build = "1.9"
