@@ -1,0 +1,398 @@
+import {
+    InstanceEntry,
+    ChangelogEntry,
+    TaskEntry,
+    GlassCard,
+    CardHeader,
+    SlimScrollbar
+} from "common.slint";
+
+// 通用圆点行组件
+component BulletLine inherits HorizontalLayout {
+    in property <string> text;
+    spacing: 7px;
+    alignment: start;
+
+    Rectangle {
+        width: 4px;
+        height: 4px;
+        y: 6px;
+        border-radius: 2px;
+        background: #64748b;
+    }
+
+    Text {
+        text: root.text;
+        color: #94a3b8;
+        font-size: 11px;
+        overflow: elide;
+    }
+}
+
+// 模块 3：实例列表活动布局卡片（复用 GlassCard、CardHeader 与 SlimScrollbar）
+export component InstanceListCard inherits GlassCard {
+    in property <[InstanceEntry]> instances: [];
+    in property <string> active_id: "inst-fabric-121";
+    callback select_instance(string);
+    callback move_instance(int, int);
+    callback manage_clicked();
+
+    private property <int> dragging_index: -1;
+    private property <length> drag_delta_y: 0px;
+    private property <length> slot_step: 58px;
+    private property <int> target_index: root.dragging_index < 0 ? -1 :
+        max(0, min(root.instances.length - 1, round((root.dragging_index * root.slot_step + root.drag_delta_y) / root.slot_step)));
+
+    width: 100%;
+    height: 100%;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        CardHeader {
+            icon_kind: "cube";
+            icon_color: #60a5fa;
+            title: "实例列表 (" + root.instances.length + ")";
+            action_text: "管理";
+            action_color: #38bdf8;
+            action_clicked => { root.manage_clicked(); }
+        }
+
+        list_viewport := Rectangle {
+            property <length> total_content_h: max(1px, root.instances.length * root.slot_step - 6px);
+            property <length> max_scroll: max(0px, self.total_content_h - self.height);
+            property <length> safe_max_scroll: max(1px, self.max_scroll);
+
+            vertical-stretch: 1;
+            clip: true;
+
+            inst_flick := Flickable {
+                width: parent.width - (list_viewport.max_scroll > 0px ? 6px : 0px);
+                height: 100%;
+                viewport-width: self.width;
+                viewport-height: max(self.height, list_viewport.total_content_h);
+                interactive: root.dragging_index < 0;
+
+                if root.dragging_index >= 0 && root.target_index >= 0: Rectangle {
+                    x: 0px;
+                    y: root.target_index * root.slot_step;
+                    width: parent.width;
+                    height: 52px;
+                    border-radius: 8px;
+                    background: #00e58b12;
+                    border-width: 1.5px;
+                    border-color: #00e58b66;
+                    animate y { duration: 120ms; easing: ease-out; }
+                }
+
+                for item[idx] in root.instances: Rectangle {
+                    property <bool> is_dragging: root.dragging_index == idx;
+                    property <int> visual_slot: root.dragging_index < 0 ? idx : (
+                        idx == root.dragging_index ? idx : (
+                            (idx > root.dragging_index && idx <= root.target_index) ? idx - 1 : (
+                                (idx < root.dragging_index && idx >= root.target_index) ? idx + 1 : idx
+                            )
+                        )
+                    );
+
+                    x: 0px;
+                    y: self.is_dragging
+                        ? max(0px, min((root.instances.length - 1) * root.slot_step, idx * root.slot_step + root.drag_delta_y))
+                        : self.visual_slot * root.slot_step;
+                    z: self.is_dragging ? 10 : 1;
+                    width: parent.width;
+                    height: 52px;
+                    border-radius: 8px;
+                    background: self.is_dragging ? #132c2be6 : (item.id == root.active_id ? #0b2220cc : (row_touch.has-hover ? #162633cc : #111d27aa));
+                    border-width: (self.is_dragging || item.id == root.active_id) ? 1.5px : 1px;
+                    border-color: (self.is_dragging || item.id == root.active_id) ? #00e58b : #1c2c38;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 10px;
+
+                        Image {
+                            width: 32px;
+                            height: 32px;
+                            y: (parent.height - self.height) / 2;
+                            source: item.icon_type == "anvil" ? @image-url("assets/icon_anvil.png") :
+                                    (item.icon_type == "modpack" ? @image-url("assets/icon_modpack.png") : @image-url("assets/icon_grass.png"));
+                            image-fit: contain;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            Text { text: item.name; color: #f8fafc; font-size: 13px; font-weight: 700; overflow: elide; }
+                            Text { text: item.subtitle; color: #64748b; font-size: 10px; overflow: elide; }
+                        }
+
+                        Rectangle {
+                            width: 54px;
+                            height: 22px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 11px;
+                            background: item.status == "active" ? #003b29 : (item.status == "installed" ? #0c2d23 : #1b2733);
+                            border-width: 1px;
+                            border-color: item.status == "active" ? #00e58b88 : (item.status == "installed" ? #00e58b55 : #334155);
+
+                            Text {
+                                text: item.status_text;
+                                color: item.status == "uninstalled" ? #94a3b8 : #00e58b;
+                                font-size: 10px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            width: 8px;
+                            alignment: center;
+                            spacing: 2.5px;
+                            Rectangle { width: 3px; height: 3px; x: 2.5px; border-radius: 1.5px; background: root.dragging_index == idx ? #00e58b : #64748b; }
+                            Rectangle { width: 3px; height: 3px; x: 2.5px; border-radius: 1.5px; background: root.dragging_index == idx ? #00e58b : #64748b; }
+                            Rectangle { width: 3px; height: 3px; x: 2.5px; border-radius: 1.5px; background: root.dragging_index == idx ? #00e58b : #64748b; }
+                        }
+                    }
+
+                    row_touch := TouchArea {
+                        mouse-cursor: self.pressed ? grabbing : pointer;
+                        scroll-event(ev) => {
+                            if (list_viewport.max_scroll > 0px) {
+                                inst_flick.viewport-y = max(-list_viewport.max_scroll, min(0px, inst_flick.viewport-y + ev.delta-y * 0.6));
+                                return accept;
+                            }
+                            return reject;
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                if (root.dragging_index != idx && abs(self.mouse-y - self.pressed-y) > 4px) {
+                                    root.dragging_index = idx;
+                                    root.drag_delta_y = 0px;
+                                }
+                                if (root.dragging_index == idx) {
+                                    root.drag_delta_y = max(
+                                        -idx * root.slot_step,
+                                        min((root.instances.length - 1 - idx) * root.slot_step, root.drag_delta_y + (self.mouse-y - self.pressed-y))
+                                    );
+                                }
+                            }
+                        }
+                        pointer-event(ev) => {
+                            if (ev.kind == PointerEventKind.up) {
+                                if (root.dragging_index == idx) {
+                                    if (root.target_index >= 0 && root.target_index != idx) {
+                                        root.move_instance(idx, root.target_index);
+                                    }
+                                    root.dragging_index = -1;
+                                    root.drag_delta_y = 0px;
+                                } else {
+                                    root.select_instance(item.id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.max_scroll > 0px: SlimScrollbar {
+                x: parent.width - 3px;
+                y: 2px;
+                height: parent.height - 4px;
+                visible_ratio: list_viewport.height / list_viewport.total_content_h;
+                scroll_progress: (-inst_flick.viewport-y) / list_viewport.safe_max_scroll;
+            }
+        }
+    }
+}
+
+// 模块 4：更新日志卡片（复用 GlassCard 与 CardHeader）
+export component ChangelogCard inherits GlassCard {
+    in property <[ChangelogEntry]> changelogs: [];
+    callback view_all_clicked();
+
+    width: 100%;
+    height: 100%;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+
+        CardHeader {
+            icon_kind: "bolt";
+            icon_color: #00e58b;
+            title: "更新日志";
+            action_text: "查看全部";
+            action_color: #64748b;
+            action_clicked => { root.view_all_clicked(); }
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            width: 100%;
+            viewport-width: self.width;
+            viewport-height: log_list.preferred-height;
+
+            log_list := VerticalLayout {
+                width: 100%;
+                spacing: 8px;
+
+                for log[idx] in root.changelogs: VerticalLayout {
+                    spacing: 5px;
+
+                    if idx > 0: Rectangle { height: 1px; background: #1a2a36; }
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        height: 18px;
+
+                        if log.badge_kind == "latest": Rectangle {
+                            width: 8px; height: 8px; y: 5px; border-radius: 4px; border-width: 2px; border-color: #00e58b;
+                        }
+                        if log.badge_kind != "latest": Rectangle {
+                            width: 7px; height: 7px; y: 5.5px; border-radius: 3.5px; background: log.badge_kind == "warning" ? #f59e0b : #00e58b;
+                        }
+
+                        Text { text: log.version; color: #f8fafc; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                        Rectangle { width: 4px; }
+                        Text { text: log.date; color: #64748b; font-size: 11px; vertical-alignment: center; }
+                    }
+
+                    if log.line_1 != "": BulletLine { text: log.line_1; }
+                    if log.line_2 != "": BulletLine { text: log.line_2; }
+                    if log.line_3 != "": BulletLine { text: log.line_3; }
+                }
+            }
+        }
+    }
+}
+
+// 模块 5：任务队列活动卡片（复用 GlassCard 与 CardHeader）
+export component TaskQueueCard inherits GlassCard {
+    in property <[TaskEntry]> tasks: [];
+    callback toggle_task_clicked(string);
+    callback pause_all_clicked();
+
+    width: 100%;
+    height: 100%;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        CardHeader {
+            icon_kind: "download";
+            icon_color: #00e58b;
+            title: "任务队列 (" + root.tasks.length + ")";
+            action_text: "全部暂停";
+            action_color: #38bdf8;
+            action_clicked => { root.pause_all_clicked(); }
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            width: 100%;
+            viewport-width: self.width;
+            viewport-height: task_list_box.preferred-height;
+
+            task_list_box := VerticalLayout {
+                width: 100%;
+                spacing: 10px;
+
+                for task[idx] in root.tasks: VerticalLayout {
+                    width: 100%;
+                    spacing: 10px;
+
+                    if idx > 0: Rectangle { height: 1px; background: #1a2a36; }
+
+                    Rectangle {
+                        width: 100%;
+                        height: 52px;
+
+                        Image {
+                            x: 0px;
+                            y: 11px;
+                            width: 28px;
+                            height: 28px;
+                            source: task.icon_type == "sodium" ? @image-url("assets/icon_sodium.png") :
+                                    (task.icon_type == "anvil" ? @image-url("assets/icon_anvil.png") :
+                                    (task.icon_type == "modpack" ? @image-url("assets/icon_modpack.png") : @image-url("assets/icon_grass.png")));
+                            image-fit: contain;
+                        }
+
+                        VerticalLayout {
+                            x: 38px;
+                            width: parent.width - 72px;
+                            height: 52px;
+                            spacing: 6px;
+                            alignment: center;
+
+                            Text { text: task.title; color: #f1f5f9; font-size: 12px; font-weight: 600; overflow: elide; }
+
+                            Rectangle {
+                                width: 100%;
+                                height: 5px;
+                                border-radius: 2.5px;
+                                background: #1e293b;
+                                Rectangle {
+                                    x: 0px;
+                                    width: parent.width * max(0.0, min(1.0, task.progress));
+                                    height: 100%;
+                                    border-radius: 2.5px;
+                                    background: task.status == "paused" ? #f59e0b : #00e58b;
+                                }
+                            }
+
+                            Rectangle {
+                                width: 100%;
+                                height: 13px;
+
+                                Text {
+                                    x: 0px;
+                                    width: parent.width - 52px;
+                                    text: task.progress_text;
+                                    color: #64748b;
+                                    font-size: 10px;
+                                    overflow: elide;
+                                }
+
+                                Text {
+                                    x: parent.width - 50px;
+                                    width: 50px;
+                                    text: task.status == "paused" ? "已暂停" : task.speed_text;
+                                    color: task.status == "paused" ? #f59e0b : #94a3b8;
+                                    font-size: 10px;
+                                    horizontal-alignment: right;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            x: parent.width - 24px;
+                            y: 14px;
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 6px;
+                            background: btn_touch.has-hover ? #223546 : #172633;
+                            border-width: 1px;
+                            border-color: #293b4b;
+
+                            if task.status != "paused": Rectangle { x: 8px; y: 7px; width: 2px; height: 10px; border-radius: 1px; background: #cbd5e1; }
+                            if task.status != "paused": Rectangle { x: 14px; y: 7px; width: 2px; height: 10px; border-radius: 1px; background: #cbd5e1; }
+                            if task.status == "paused": Path { x: 8px; y: 7px; width: 9px; height: 10px; commands: "M 1 1 L 8 5 L 1 9 Z"; fill: #00e58b; }
+
+                            btn_touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.toggle_task_clicked(task.id); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

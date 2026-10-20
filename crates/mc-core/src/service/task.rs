@@ -31,6 +31,42 @@ impl InMemoryTaskService {
         Self::default()
     }
 
+    /// 注入示例后台任务数据，供桌面端任务队列联调展示
+    pub async fn with_sample_data(self) -> Self {
+        let now = Utc::now();
+        let t1 = Task {
+            id: "task-mc-121".to_string(),
+            task_type: TaskType::DownloadVersion,
+            status: TaskStatus::Running,
+            progress: TaskProgress {
+                percentage: 56.0,
+                step_description: "Minecraft 1.21 游戏本体|684 MB / 1.2 GB (56%)|12.3 MB/s|grass"
+                    .to_string(),
+            },
+            error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let t2 = Task {
+            id: "task-sodium-0511".to_string(),
+            task_type: TaskType::InstallMod,
+            status: TaskStatus::Running,
+            progress: TaskProgress {
+                percentage: 63.0,
+                step_description: "Sodium-0.5.11.jar|663 MB / 1.1 GB (63%)|2.1 MB/s|sodium"
+                    .to_string(),
+            },
+            error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let mut map = self.tasks.write().await;
+        map.insert(t1.id.clone(), t1);
+        map.insert(t2.id.clone(), t2);
+        drop(map);
+        self
+    }
+
     /// 创建并注册一个新任务
     pub async fn register_task(&self, task_type: TaskType) -> Task {
         let id = format!("task-{}", uuid::Uuid::new_v4().simple());
@@ -73,7 +109,10 @@ impl TaskService for InMemoryTaskService {
             task.updated_at = Utc::now();
             Ok(())
         } else {
-            Err(LauncherError::Internal(format!("无法取消不存在的任务: {}", task_id)))
+            Err(LauncherError::Internal(format!(
+                "无法取消不存在的任务: {}",
+                task_id
+            )))
         }
     }
 }

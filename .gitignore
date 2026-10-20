@@ -1,5 +1,6 @@
 # Rust 编译产物
 /target/
+/.build-backend/
 **/*.rs.bk
 
 # 游戏实例与本地数据运行目录

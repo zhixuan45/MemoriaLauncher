@@ -1,0 +1,620 @@
+import {
+    PlayerProfile,
+    GlassCard,
+    CardHeader,
+    VectorIcon,
+    ToggleSwitch,
+    PlayerAvatar
+} from "common.slint";
+
+// 启动器行为单项开关行（复用 VectorIcon 与 ToggleSwitch）
+component BehaviorToggleRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> icon_kind;
+    in-out property <bool> checked: false;
+    callback toggled(bool);
+
+    height: 44px;
+
+    HorizontalLayout {
+        spacing: 10px;
+
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 7px;
+            background: #0c2924;
+
+            VectorIcon {
+                x: 6px;
+                y: 6px;
+                width: 16px;
+                height: 16px;
+                kind: root.icon_kind;
+                icon_color: #00e58b;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: root.title; color: #f1f5f9; font-size: 12px; font-weight: 600; }
+            Text { text: root.subtitle; color: #64748b; font-size: 10px; overflow: elide; }
+        }
+
+        ToggleSwitch {
+            y: (parent.height - self.height) / 2;
+            checked <=> root.checked;
+            toggled(val) => { root.toggled(val); }
+        }
+    }
+}
+
+// 下拉选择行组件
+component DropdownFieldRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value_text;
+    callback clicked();
+
+    height: 36px;
+
+    HorizontalLayout {
+        spacing: 10px;
+
+        Text {
+            width: 82px;
+            text: root.label;
+            color: #cbd5e1;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 32px;
+            y: 2px;
+            border-radius: 7px;
+            background: dd_touch.has-hover ? #162634 : #111e29;
+            border-width: 1px;
+            border-color: #243847;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 6px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.value_text;
+                    color: #f1f5f9;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Path {
+                    width: 8px;
+                    height: 5px;
+                    y: (parent.height - self.height) / 2;
+                    commands: "M 1 1 L 4 4 L 7 1";
+                    stroke: #94a3b8;
+                    stroke-width: 1.4px;
+                }
+            }
+
+            dd_touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.clicked(); }
+            }
+        }
+    }
+}
+
+// 数据管理列表项复用组件
+component DataManageRow inherits Rectangle {
+    in property <string> icon_kind;
+    in property <color> icon_color: #7dd3fc;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> danger: false;
+    callback clicked();
+
+    height: 36px;
+    border-radius: 7px;
+    background: row_touch.has-hover ? (root.danger ? #2a161daa : #142430aa) : transparent;
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 10px;
+
+        VectorIcon {
+            width: 15px;
+            height: 15px;
+            y: (parent.height - self.height) / 2;
+            kind: root.icon_kind;
+            icon_color: root.icon_color;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            horizontal-stretch: 1;
+            Text { text: root.title; color: #f1f5f9; font-size: 12px; font-weight: 600; }
+            Text { text: root.subtitle; color: #64748b; font-size: 10px; overflow: elide; }
+        }
+
+        Path {
+            width: 5px;
+            height: 8px;
+            y: (parent.height - self.height) / 2;
+            commands: "M 1 1 L 4 4 L 1 7";
+            stroke: #64748b;
+            stroke-width: 1.4px;
+        }
+    }
+
+    row_touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 快捷操作 2x2 磁贴复用组件
+component QuickActionTile inherits Rectangle {
+    in property <string> icon_kind;
+    in property <color> icon_color: #38bdf8;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> danger: false;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    border-radius: 8px;
+    background: tile_touch.has-hover ? (root.danger ? #471821 : #162836) : (root.danger ? #35131be8 : #101e29);
+    border-width: 1px;
+    border-color: root.danger ? #ef444455 : #213444;
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        VectorIcon {
+            width: 16px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            kind: root.icon_kind;
+            icon_color: root.icon_color;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                color: root.danger ? #fecdd3 : #f1f5f9;
+                font-size: 12px;
+                font-weight: root.danger ? 700 : 600;
+            }
+            Text {
+                text: root.subtitle;
+                color: root.danger ? #f87171 : #64748b;
+                font-size: 10px;
+            }
+        }
+    }
+
+    tile_touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 顶部二级导航标签复用组件
+component SettingsSubTab inherits Rectangle {
+    in property <string> title;
+    in property <string> icon_kind;
+    in property <bool> active: false;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    height: 100%;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 7px;
+
+        VectorIcon {
+            width: 15px;
+            height: 15px;
+            y: (parent.height - self.height) / 2;
+            kind: root.icon_kind;
+            icon_color: root.active ? #00e58b : #cbd5e1;
+        }
+
+        Text {
+            text: root.title;
+            color: root.active ? #00e58b : #cbd5e1;
+            font-size: 12px;
+            font-weight: root.active ? 700 : 500;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.active: Rectangle {
+        x: 16px;
+        y: parent.height - 2.5px;
+        width: parent.width - 32px;
+        height: 2.5px;
+        border-radius: 1.2px;
+        background: #00e58b;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 设置主视图组件
+export component SettingsView inherits Rectangle {
+    in property <[PlayerProfile]> profiles: [];
+    in property <PlayerProfile> current_profile;
+    in-out property <float> bg_mask_opacity: 0.0;
+    in-out property <string> status_text: "就绪";
+
+    callback select_profile(string);
+    callback cycle_profile_clicked();
+    callback action_triggered(string);
+
+    private property <int> active_sub_tab: 0;
+    private property <bool> auto_start: false;
+    private property <bool> minimize_on_launch: true;
+    private property <bool> auto_check_update: true;
+    private property <bool> minimize_on_close: false;
+    private property <bool> beta_update: false;
+    private property <int> lang_idx: 0;
+    private property <int> region_idx: 0;
+    private property <int> date_fmt_idx: 0;
+
+    width: 100%;
+    height: 100%;
+
+    VerticalLayout {
+        padding-top: 42px;
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-bottom: 16px;
+        spacing: 12px;
+
+        // 1. 顶部标题与搜索框行
+        HorizontalLayout {
+            height: 42px;
+            spacing: 12px;
+
+            Text { text: "设置"; color: #ffffff; font-size: 26px; font-weight: 800; vertical-alignment: bottom; }
+            Text { text: "自定义你的 Minecraft 启动器，让游戏体验更适合你"; color: #94a3b8; font-size: 12px; vertical-alignment: bottom; }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Rectangle {
+                width: 236px;
+                height: 34px;
+                y: 4px;
+                border-radius: 8px;
+                background: #0d1821d8;
+                border-width: 1px;
+                border-color: search_input.has-focus ? #00e58b88 : #223544;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+
+                    Rectangle {
+                        width: 14px;
+                        height: 14px;
+                        y: (parent.height - self.height) / 2;
+                        Rectangle { x: 1px; y: 1px; width: 9px; height: 9px; border-radius: 4.5px; border-width: 1.5px; border-color: #94a3b8; }
+                        Path { x: 8px; y: 8px; width: 5px; height: 5px; commands: "M 1 1 L 4.5 4.5"; stroke: #94a3b8; stroke-width: 1.5px; }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 100%;
+                        if search_input.text == "": Text { text: "搜索设置项..."; color: #64748b; font-size: 11px; vertical-alignment: center; }
+                        search_input := TextInput { width: 100%; height: 100%; color: #f1f5f9; font-size: 11px; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+
+        // 2. 二级分类导航条
+        GlassCard {
+            height: 42px;
+            border-radius: 10px;
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                SettingsSubTab { title: "常规"; icon_kind: "gear"; active: root.active_sub_tab == 0; clicked => { root.active_sub_tab = 0; } }
+                SettingsSubTab { title: "游戏设置"; icon_kind: "gamepad"; active: root.active_sub_tab == 1; clicked => { root.active_sub_tab = 1; root.action_triggered("已切换至「游戏设置」分栏"); } }
+                SettingsSubTab { title: "下载安装"; icon_kind: "download"; active: root.active_sub_tab == 2; clicked => { root.active_sub_tab = 2; root.action_triggered("已切换至「下载安装」分栏"); } }
+                SettingsSubTab { title: "环境配置"; icon_kind: "env"; active: root.active_sub_tab == 3; clicked => { root.active_sub_tab = 3; root.action_triggered("已切换至「环境配置」分栏"); } }
+                SettingsSubTab { title: "AI 设置"; icon_kind: "ai"; active: root.active_sub_tab == 4; clicked => { root.active_sub_tab = 4; root.action_triggered("已切换至「AI 设置」分栏"); } }
+                SettingsSubTab { title: "界面外观"; icon_kind: "theme"; active: root.active_sub_tab == 5; clicked => { root.active_sub_tab = 5; root.action_triggered("已切换至「界面外观」分栏"); } }
+                SettingsSubTab { title: "高级设置"; icon_kind: "advanced"; active: root.active_sub_tab == 6; clicked => { root.active_sub_tab = 6; root.action_triggered("已切换至「高级设置」分栏"); } }
+            }
+        }
+
+        // 3. 主体卡片区：上排三列 + 下排两列
+        VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 12px;
+
+            HorizontalLayout {
+                height: 270px;
+                spacing: 12px;
+
+                // 卡片 1：启动器行为
+                GlassCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 8px;
+                        CardHeader { icon_kind: "play"; icon_color: #00e58b; title: "启动器行为"; }
+                        BehaviorToggleRow {
+                            title: "开机自动启动"; subtitle: "随系统启动时自动运行启动器"; icon_kind: "gear"; checked <=> root.auto_start;
+                            toggled(v) => { root.action_triggered(v ? "已开启：开机自动启动" : "已关闭：开机自动启动"); }
+                        }
+                        BehaviorToggleRow {
+                            title: "启动后最小化到托盘"; subtitle: "启动器启动后自动最小化到系统托盘"; icon_kind: "shield"; checked <=> root.minimize_on_launch;
+                            toggled(v) => { root.action_triggered(v ? "已开启：启动后最小化到托盘" : "已关闭：启动后最小化到托盘"); }
+                        }
+                        BehaviorToggleRow {
+                            title: "启动时自动检查更新"; subtitle: "启动器启动时检查新版本"; icon_kind: "gear"; checked <=> root.auto_check_update;
+                            toggled(v) => { root.action_triggered(v ? "已开启：启动时自动检查更新" : "已关闭：启动时自动检查更新"); }
+                        }
+                        BehaviorToggleRow {
+                            title: "关闭时最小化到托盘"; subtitle: "点击关闭按钮时最小化而非退出"; icon_kind: "clock"; checked <=> root.minimize_on_close;
+                            toggled(v) => { root.action_triggered(v ? "已开启：关闭时最小化到托盘" : "已关闭：关闭时最小化到托盘"); }
+                        }
+                    }
+                }
+
+                // 卡片 2：语言与地区
+                GlassCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 12px;
+                        CardHeader { icon_kind: "globe"; icon_color: #38bdf8; title: "语言与地区"; }
+                        DropdownFieldRow {
+                            label: "界面语言";
+                            value_text: root.lang_idx == 0 ? "简体中文 (Chinese)" : (root.lang_idx == 1 ? "繁體中文 (Traditional)" : "English (US)");
+                            clicked => { root.lang_idx = mod(root.lang_idx + 1, 3); root.action_triggered("已切换界面语言首选项"); }
+                        }
+                        DropdownFieldRow {
+                            label: "地区设置";
+                            value_text: root.region_idx == 0 ? "中国大陆" : (root.region_idx == 1 ? "中国香港 / 台湾" : "Global (国际)");
+                            clicked => { root.region_idx = mod(root.region_idx + 1, 3); root.action_triggered("已切换镜像与地区设置"); }
+                        }
+                        DropdownFieldRow {
+                            label: "日期与时间格式";
+                            value_text: root.date_fmt_idx == 0 ? "YYYY-MM-DD (2024-12-28)" : (root.date_fmt_idx == 1 ? "DD/MM/YYYY (28/12/2024)" : "MM/DD/YYYY (12/28/2024)");
+                            clicked => { root.date_fmt_idx = mod(root.date_fmt_idx + 1, 3); root.action_triggered("已更新日期与时间显示格式"); }
+                        }
+
+                        Rectangle { vertical-stretch: 1; }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            Rectangle {
+                                width: 14px; height: 14px; y: 2px; border-radius: 7px; border-width: 1.2px; border-color: #64748b;
+                                Text { text: "i"; color: #94a3b8; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: "部分内容（如 Mod 信息）可能仍使用原始语言，\n可在 AI 功能中启用自动翻译。";
+                                color: #64748b;
+                                font-size: 10px;
+                            }
+                        }
+                    }
+                }
+
+                // 卡片 3：账户与数据（与侧边栏底部玩家档案双向实时同步）
+                GlassCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 7px;
+                        CardHeader { icon_kind: "user"; icon_color: #38bdf8; title: "账户与数据"; }
+                        Text { text: "当前账户"; color: #94a3b8; font-size: 11px; }
+
+                        HorizontalLayout {
+                            height: 42px;
+                            spacing: 10px;
+
+                            PlayerAvatar {
+                                width: 38px;
+                                height: 38px;
+                                y: 2px;
+                                avatar: root.current_profile.avatar;
+                                has_avatar: root.current_profile.has_avatar;
+                                hair_color: root.current_profile.skin_tint;
+                                online: root.current_profile.online;
+                                show_status_dot: false;
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 3px;
+                                horizontal-stretch: 1;
+                                Text { text: root.current_profile.username; color: #ffffff; font-size: 13px; font-weight: 700; overflow: elide; }
+
+                                Rectangle {
+                                    width: mode_lbl.preferred-width + 12px;
+                                    height: 18px;
+                                    border-radius: 4px;
+                                    background: root.current_profile.online ? #112a38 : #1b2733;
+                                    border-width: 1px;
+                                    border-color: root.current_profile.online ? #38bdf844 : #334155;
+                                    mode_lbl := Text {
+                                        text: root.current_profile.account_type;
+                                        color: root.current_profile.online ? #7dd3fc : #94a3b8;
+                                        font-size: 10px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 68px;
+                                height: 30px;
+                                y: 6px;
+                                border-radius: 7px;
+                                background: switch_acc_touch.has-hover ? #1d3142 : #142430;
+                                border-width: 1px;
+                                border-color: #2b4254;
+                                Text { text: "更换账户"; color: #e2e8f0; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                switch_acc_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.cycle_profile_clicked(); }
+                                }
+                            }
+                        }
+
+                        Text { text: "数据管理"; color: #94a3b8; font-size: 11px; }
+
+                        DataManageRow {
+                            icon_kind: "cloud"; icon_color: #7dd3fc; title: "备份与恢复"; subtitle: "备份游戏、设置、下载记录等";
+                            clicked => { root.action_triggered("已打开「备份与恢复」向导"); }
+                        }
+                        DataManageRow {
+                            icon_kind: "folder"; icon_color: #7dd3fc; title: "打开数据文件夹"; subtitle: "打开启动器的存储目录";
+                            clicked => { root.action_triggered("正在打开启动器数据存储目录..."); }
+                        }
+                        DataManageRow {
+                            icon_kind: "trash"; icon_color: #ef4444; title: "清理缓存"; subtitle: "清理临时文件和缓存数据"; danger: true;
+                            clicked => { root.action_triggered("已清理临时文件与缓存数据"); }
+                        }
+                    }
+                }
+            }
+
+            // 下排两张卡片
+            HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 12px;
+
+                // 卡片 4：启动器更新
+                GlassCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 10px;
+                        CardHeader { icon_kind: "upload"; icon_color: #38bdf8; title: "启动器更新"; }
+
+                        HorizontalLayout {
+                            height: 20px;
+                            spacing: 8px;
+                            Text { text: "当前版本"; color: #94a3b8; font-size: 12px; vertical-alignment: center; }
+                            Text { text: "v0.1.0"; color: #f8fafc; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle { width: 7px; height: 7px; y: 6.5px; border-radius: 3.5px; background: #00e58b; }
+                            Text { text: "已是最新版本"; color: #00e58b; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                        }
+
+                        Rectangle {
+                            height: 34px;
+                            border-radius: 8px;
+                            background: chk_touch.has-hover ? #1a2d3d : #12212d;
+                            border-width: 1px;
+                            border-color: #263b4b;
+                            Text { text: "检查更新"; color: #e2e8f0; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            chk_touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.action_triggered("已连接更新服务器：当前 v0.1.0 已是最新版本"); }
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; }
+
+                        HorizontalLayout {
+                            height: 36px;
+                            spacing: 10px;
+                            Rectangle {
+                                width: 26px; height: 26px; y: 5px; border-radius: 6px; background: #132330;
+                                VectorIcon { x: 5px; y: 5px; width: 16px; height: 16px; kind: "cube"; icon_color: #cbd5e1; }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                horizontal-stretch: 1;
+                                Text { text: "启用测试版更新"; color: #f1f5f9; font-size: 12px; font-weight: 600; }
+                                Text { text: "获取最新的测试功能（可能不稳定）"; color: #64748b; font-size: 10px; }
+                            }
+                            ToggleSwitch {
+                                y: 8px;
+                                checked <=> root.beta_update;
+                                toggled(v) => { root.action_triggered(v ? "已加入测试版更新通道" : "已切换回稳定版更新通道"); }
+                            }
+                        }
+                    }
+                }
+
+                // 卡片 5：快捷操作（复用 QuickActionTile）
+                GlassCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 10px;
+                        CardHeader { icon_kind: "bolt"; icon_color: #facc15; title: "快捷操作"; }
+
+                        HorizontalLayout {
+                            vertical-stretch: 1;
+                            spacing: 10px;
+                            QuickActionTile {
+                                icon_kind: "upload"; icon_color: #38bdf8; title: "导出启动器设置"; subtitle: "备份当前设置到文件";
+                                clicked => { root.action_triggered("已导出启动器设置备份文件"); }
+                            }
+                            QuickActionTile {
+                                icon_kind: "download"; icon_color: #00e58b; title: "导入启动器设置"; subtitle: "从文件恢复设置";
+                                clicked => { root.action_triggered("已从配置文件导入启动器设置"); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            vertical-stretch: 1;
+                            spacing: 10px;
+                            QuickActionTile {
+                                icon_kind: "refresh"; icon_color: #facc15; title: "恢复默认设置"; subtitle: "将所有设置恢复为默认值";
+                                clicked => {
+                                    root.auto_start = false;
+                                    root.minimize_on_launch = true;
+                                    root.auto_check_update = true;
+                                    root.minimize_on_close = false;
+                                    root.beta_update = false;
+                                    root.lang_idx = 0;
+                                    root.region_idx = 0;
+                                    root.date_fmt_idx = 0;
+                                    root.action_triggered("已将所有常规设置恢复为默认值");
+                                }
+                            }
+                            QuickActionTile {
+                                icon_kind: "trash"; icon_color: #ef4444; title: "完全重置"; subtitle: "清除所有数据\n（不可恢复）"; danger: true;
+                                clicked => { root.action_triggered("安全提示：完全重置需二次确认"); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

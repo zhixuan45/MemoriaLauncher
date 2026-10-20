@@ -1,0 +1,670 @@
+import {
+    AiPromptEntry,
+    AiShowcaseEntry,
+    AiTaskEntry,
+    GlassCard,
+    VectorIcon,
+    CardHeader,
+    SlimScrollbar
+} from "common.slint";
+
+// AI 任务步骤行组件（纯矢量绘制勾选框、进行中圆点与待处理空心框）
+component AiStepRow inherits HorizontalLayout {
+    in property <string> label: "";
+    in property <string> state: "pending"; // "done" | "active" | "pending"
+
+    height: 18px;
+    spacing: 7px;
+    alignment: start;
+
+    Rectangle {
+        width: 13px; height: 13px; y: (parent.height - self.height) / 2;
+        border-radius: root.state == "active" ? 6.5px : 3px;
+        background: root.state == "done" ? #00e58b24 : (root.state == "active" ? #a855f728 : transparent);
+        border-width: 1.2px;
+        border-color: root.state == "done" ? #00e58b : (root.state == "active" ? #c084fc : #475569);
+
+        if root.state == "done": Path {
+            x: 2px; y: 2.5px; width: 9px; height: 8px;
+            commands: "M 1 4 L 3.5 6.5 L 8 1.5";
+            stroke: #00e58b; stroke-width: 1.5px;
+        }
+        if root.state == "active": Rectangle {
+            x: 3.5px; y: 3.5px; width: 6px; height: 6px;
+            border-radius: 3px; background: #c084fc;
+        }
+    }
+
+    Text {
+        text: root.label;
+        color: root.state == "done" ? #cbd5e1 : (root.state == "active" ? #f8fafc : #64748b);
+        font-size: 11px;
+        font-weight: root.state == "active" ? 600 : 400;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// 实用示例卡片顶部纯矢量主题插画（RPG城堡、科技齿轮高塔、樱花夕阳光影、命令方块数据包）
+component ShowcaseThumbnail inherits Rectangle {
+    in property <string> theme_kind: "rpg";
+
+    height: 74px;
+    border-radius: 8px;
+    clip: true;
+    background: root.theme_kind == "rpg" ? @linear-gradient(135deg, #1e1b4b 0%, #4c1d95 55%, #7c2d12 100%) :
+                (root.theme_kind == "tech" ? @linear-gradient(135deg, #082f49 0%, #0f4c5c 55%, #1e293b 100%) :
+                (root.theme_kind == "shader" ? @linear-gradient(135deg, #3b0764 0%, #be185d 55%, #f97316 100%) :
+                 @linear-gradient(135deg, #31102f 0%, #7c2d12 55%, #d97706 100%)));
+
+    // 主题 1：RPG 冒险整合包（夜空星月、像素城堡群与暖光灯火）
+    if root.theme_kind == "rpg": Rectangle {
+        width: 100%; height: 100%;
+        Rectangle { x: 16px; y: 10px; width: 22px; height: 22px; border-radius: 11px; background: #fef08a33; }
+        Rectangle { x: 20px; y: 14px; width: 14px; height: 14px; border-radius: 7px; background: #fef08a; }
+        Rectangle { x: 58px; y: 12px; width: 3px; height: 3px; border-radius: 1.5px; background: #e9d5ff; }
+        Rectangle { x: 130px; y: 16px; width: 2.5px; height: 2.5px; border-radius: 1.2px; background: #fde68a; }
+        Path { width: 100%; height: 100%; commands: "M 0 74 L 0 48 L 38 30 L 76 50 L 122 26 L 170 52 L 170 74 Z"; fill: #1e1b4b99; }
+        Rectangle { x: 64px; y: 24px; width: 34px; height: 50px; background: #0f172a; }
+        Rectangle { x: 48px; y: 36px; width: 18px; height: 38px; background: #1e1b4b; }
+        Rectangle { x: 96px; y: 34px; width: 20px; height: 40px; background: #1e1b4b; }
+        Path { width: 100%; height: 100%; commands: "M 62 24 L 81 10 L 100 24 Z M 46 36 L 57 24 L 68 36 Z M 94 34 L 106 22 L 118 34 Z"; fill: #312e81; }
+        Rectangle { x: 74px; y: 32px; width: 5px; height: 7px; border-radius: 1px; background: #fbbf24; }
+        Rectangle { x: 83px; y: 32px; width: 5px; height: 7px; border-radius: 1px; background: #fbbf24; }
+        Rectangle { x: 77px; y: 46px; width: 8px; height: 11px; border-radius: 2px; background: #f59e0b; }
+        Rectangle { x: 55px; y: 44px; width: 4px; height: 6px; background: #fde047; }
+        Rectangle { x: 104px; y: 42px; width: 4px; height: 6px; background: #fde047; }
+    }
+
+    // 主题 2：科技生存整合包（能量网格、反应堆高塔与精密齿轮）
+    if root.theme_kind == "tech": Rectangle {
+        width: 100%; height: 100%;
+        Rectangle { x: 0px; y: 24px; width: 100%; height: 1px; background: #38bdf822; }
+        Rectangle { x: 0px; y: 48px; width: 100%; height: 1px; background: #38bdf822; }
+        Rectangle { x: 42px; y: 0px; width: 1px; height: 100%; background: #38bdf822; }
+        Rectangle { x: 112px; y: 0px; width: 1px; height: 100%; background: #38bdf822; }
+        Rectangle { x: 24px; y: 20px; width: 22px; height: 54px; background: #0f172a; border-width: 1px; border-color: #0284c7; }
+        Rectangle { x: 31px; y: 28px; width: 8px; height: 36px; border-radius: 2px; background: #00e58baa; }
+        Rectangle { x: 46px; y: 38px; width: 32px; height: 6px; background: #1e293b; border-width: 1px; border-color: #38bdf888; }
+        Rectangle {
+            x: 74px; y: 16px; width: 42px; height: 42px;
+            border-radius: 21px; border-width: 2.5px; border-color: #38bdf8aa; background: #082f49cc;
+            Rectangle { x: 9px; y: 9px; width: 24px; height: 24px; border-radius: 12px; border-width: 2px; border-color: #00e58b; background: #00e58b33; }
+            Rectangle { x: 16px; y: 16px; width: 10px; height: 10px; border-radius: 5px; background: #a7f3d0; }
+        }
+        Rectangle { x: 128px; y: 30px; width: 14px; height: 44px; background: #0f172a; border-width: 1px; border-color: #38bdf866; }
+        Rectangle { x: 132px; y: 36px; width: 6px; height: 6px; border-radius: 3px; background: #38bdf8; }
+        Rectangle { x: 132px; y: 46px; width: 6px; height: 6px; border-radius: 3px; background: #00e58b; }
+    }
+
+    // 主题 3：写实光影配置（落日余晖、远山层峦与水面波光倒影）
+    if root.theme_kind == "shader": Rectangle {
+        width: 100%; height: 100%;
+        Rectangle { x: 64px; y: 10px; width: 38px; height: 38px; border-radius: 19px; background: #fde04738; }
+        Rectangle { x: 71px; y: 17px; width: 24px; height: 24px; border-radius: 12px; background: #fef08a; }
+        Path { width: 100%; height: 100%; commands: "M 0 50 L 32 28 L 68 46 L 112 24 L 165 48 L 165 52 L 0 52 Z"; fill: #4c1d95cc; }
+        Rectangle {
+            x: 0px; y: 48px; width: 100%; height: 26px;
+            background: @linear-gradient(180deg, #581c87ee 0%, #1e1b4b 100%);
+            Rectangle { x: 68px; y: 4px; width: 30px; height: 2.5px; border-radius: 1.2px; background: #fde047cc; }
+            Rectangle { x: 72px; y: 10px; width: 22px; height: 2px; border-radius: 1px; background: #fb923ccc; }
+            Rectangle { x: 76px; y: 16px; width: 14px; height: 2px; border-radius: 1px; background: #f472b6aa; }
+        }
+        Rectangle { x: 10px; y: 8px; width: 28px; height: 18px; border-radius: 9px; background: #f472b666; }
+        Rectangle { x: 24px; y: 14px; width: 22px; height: 14px; border-radius: 7px; background: #fb718566; }
+    }
+
+    // 主题 4：自定义玩法（像素命令方块、脉冲波纹与指令符文）
+    if root.theme_kind == "custom": Rectangle {
+        width: 100%; height: 100%;
+        Rectangle { x: 0px; y: 54px; width: 100%; height: 20px; background: #451a03aa; }
+        Rectangle { x: 14px; y: 44px; width: 32px; height: 12px; background: #78350f88; }
+        Rectangle { x: 118px; y: 40px; width: 36px; height: 16px; background: #78350f88; }
+        Rectangle {
+            x: 61px; y: 15px; width: 44px; height: 44px;
+            border-radius: 7px; background: #9a3412; border-width: 2px; border-color: #fbbf24;
+            Rectangle {
+                x: 5px; y: 5px; width: 34px; height: 34px;
+                border-radius: 4px; background: #431407; border-width: 1px; border-color: #f9731688;
+                Rectangle { x: 7px; y: 7px; width: 5px; height: 5px; background: #38bdf8; }
+                Rectangle { x: 15px; y: 7px; width: 5px; height: 5px; background: #fbbf24; }
+                Rectangle { x: 22px; y: 7px; width: 5px; height: 5px; background: #f43f5e; }
+                Path { x: 8px; y: 16px; width: 18px; height: 12px; commands: "M 1 2 L 6 6 L 1 10 M 8 10 L 16 10"; stroke: #fde047; stroke-width: 1.8px; }
+            }
+        }
+        Rectangle { x: 42px; y: 22px; width: 5px; height: 5px; border-radius: 2.5px; background: #fde047; }
+        Rectangle { x: 116px; y: 26px; width: 4px; height: 4px; border-radius: 2px; background: #38bdf8; }
+    }
+}
+
+// 实用示例单项卡片组件
+component AiShowcaseCard inherits Rectangle {
+    in property <AiShowcaseEntry> entry;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    height: 182px;
+    border-radius: 10px;
+    background: card_touch.has-hover ? #152534f0 : #0e1a24e6;
+    border-width: 1px;
+    border-color: card_touch.has-hover ? #a855f7aa : #1f3242;
+
+    VerticalLayout {
+        padding: 9px;
+        spacing: 7px;
+
+        ShowcaseThumbnail { theme_kind: root.entry.theme_kind; }
+
+        Text { text: root.entry.title; color: #f8fafc; font-size: 13px; font-weight: 700; overflow: elide; }
+
+        HorizontalLayout {
+            spacing: 5px; alignment: start; height: 18px;
+            for tag_text in [root.entry.tag_1, root.entry.tag_2, root.entry.tag_3]: Rectangle {
+                height: 18px; width: tag_lbl.preferred-width + 12px;
+                border-radius: 4px; background: #182836; border-width: 1px; border-color: #2b3f50;
+                tag_lbl := Text {
+                    x: 6px; width: parent.width - 12px; height: 100%;
+                    text: tag_text; color: #cbd5e1; font-size: 10px; vertical-alignment: center;
+                }
+            }
+        }
+
+        Text {
+            text: root.entry.description; color: #94a3b8; font-size: 10.5px;
+            wrap: word-wrap; overflow: elide; vertical-stretch: 1;
+        }
+    }
+
+    card_touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// 右侧 AI 任务单项卡片组件
+component AiTaskCard inherits Rectangle {
+    in property <AiTaskEntry> task;
+    callback toggle_clicked();
+    callback remove_clicked();
+    callback scroll_delta(length);
+
+    width: 100%;
+    height: root.task.has_steps ? (root.task.step_5 != "" ? 196px : 176px) : 108px;
+    border-radius: 10px;
+    background: #101d29e8;
+    border-width: 1px;
+    border-color: #213547;
+
+    TouchArea {
+        width: 100%; height: 100%;
+        scroll-event(ev) => { root.scroll_delta(ev.delta-y); return accept; }
+    }
+
+    VerticalLayout {
+        padding: 11px;
+        spacing: 7px;
+
+        HorizontalLayout {
+            spacing: 9px; height: 32px;
+            Rectangle {
+                width: 30px; height: 30px; y: 1px;
+                border-radius: 7px; background: #182938; border-width: 1px; border-color: #294054;
+                VectorIcon { x: 7px; y: 7px; width: 16px; height: 16px; kind: root.task.icon_kind; icon_color: root.task.icon_color; }
+            }
+            VerticalLayout {
+                alignment: center; spacing: 2px; horizontal-stretch: 1;
+                Text { text: root.task.title; color: #f8fafc; font-size: 12px; font-weight: 700; overflow: elide; }
+                Text {
+                    text: root.task.status == "paused" ? "已暂停执行" : root.task.subtitle;
+                    color: root.task.status == "paused" ? #fbbf24 : #94a3b8;
+                    font-size: 10px; overflow: elide;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px; height: 14px; alignment: center;
+            Rectangle {
+                horizontal-stretch: 1; height: 6px; y: (parent.height - self.height) / 2;
+                border-radius: 3px; background: #192a38; clip: true;
+                Rectangle {
+                    x: 0px; y: 0px; height: 100%; border-radius: 3px;
+                    width: parent.width * max(0.0, min(1.0, root.task.progress));
+                    background: root.task.icon_kind == "mountain"
+                        ? @linear-gradient(90deg, #3b82f6 0%, #a855f7 100%)
+                        : root.task.bar_color;
+                }
+            }
+            Text { text: root.task.progress_label; color: #e2e8f0; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+        }
+
+        if root.task.has_steps: VerticalLayout {
+            spacing: 3px;
+            if root.task.step_1 != "": AiStepRow { label: root.task.step_1; state: root.task.step_1_state; }
+            if root.task.step_2 != "": AiStepRow { label: root.task.step_2; state: root.task.step_2_state; }
+            if root.task.step_3 != "": AiStepRow { label: root.task.step_3; state: root.task.step_3_state; }
+            if root.task.step_4 != "": AiStepRow { label: root.task.step_4; state: root.task.step_4_state; }
+            if root.task.step_5 != "": AiStepRow { label: root.task.step_5; state: root.task.step_5_state; }
+        }
+
+        HorizontalLayout {
+            height: 22px; spacing: 6px; alignment: center;
+            Text { text: root.task.speed_text; color: #94a3b8; font-size: 10.5px; vertical-alignment: center; horizontal-stretch: 1; }
+
+            // 暂停/继续按钮 [ || ]
+            Rectangle {
+                width: 24px; height: 20px; border-radius: 5px;
+                background: pause_touch.has-hover ? #24384a : #182836;
+                border-width: 1px; border-color: #2b4154;
+                if root.task.status != "paused": HorizontalLayout {
+                    alignment: center; spacing: 3px;
+                    Rectangle { width: 2px; height: 8px; y: 6px; background: #cbd5e1; }
+                    Rectangle { width: 2px; height: 8px; y: 6px; background: #cbd5e1; }
+                }
+                if root.task.status == "paused": Path { x: 8px; y: 5px; width: 8px; height: 10px; commands: "M 1 1 L 8 5 L 1 9 Z"; fill: #00e58b; }
+                pause_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.toggle_clicked(); }
+                    scroll-event(ev) => { root.scroll_delta(ev.delta-y); return accept; }
+                }
+            }
+
+            // 取消/移除按钮 [ X ]
+            Rectangle {
+                width: 24px; height: 20px; border-radius: 5px;
+                background: del_touch.has-hover ? #ef444433 : #182836;
+                border-width: 1px; border-color: del_touch.has-hover ? #ef444488 : #2b4154;
+                Path {
+                    x: 8px; y: 6px; width: 8px; height: 8px;
+                    commands: "M 1 1 L 7 7 M 7 1 L 1 7";
+                    stroke: del_touch.has-hover ? #fca5a5 : #94a3b8; stroke-width: 1.4px;
+                }
+                del_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.remove_clicked(); }
+                    scroll-event(ev) => { root.scroll_delta(ev.delta-y); return accept; }
+                }
+            }
+        }
+    }
+}
+
+// ==================== AI 功能主视图 (对应 current_tab == 2) ====================
+export component AiView inherits Rectangle {
+    in property <[AiPromptEntry]> quick_prompts: [];
+    in property <[AiShowcaseEntry]> showcases: [];
+    in property <[AiTaskEntry]> ai_tasks: [];
+    in-out property <string> status_text: "就绪";
+
+    in-out property <string> prompt_text: "";
+    private property <int> version_index: 0;
+    private property <[string]> version_options: ["1.21", "1.20.4", "1.20.1", "1.19.2", "1.18.2"];
+    private property <string> target_version: self.version_options[self.version_index];
+
+    private property <int> lang_index: 0;
+    private property <[string]> lang_options: ["简体中文", "繁體中文", "English"];
+    private property <string> output_lang: self.lang_options[self.lang_index];
+
+    private property <bool> web_search_enabled: true;
+    private property <string> attached_file: "";
+
+    callback submit_prompt(string, string, string);
+    callback cycle_prompts_clicked();
+    callback select_showcase(string);
+    callback toggle_ai_task(string);
+    callback remove_ai_task(string);
+    callback action_triggered(string);
+
+    width: 100%;
+    height: 100%;
+
+    HorizontalLayout {
+        padding-top: 38px;
+        padding-left: 20px;
+        padding-right: 16px;
+        padding-bottom: 14px;
+        spacing: 14px;
+
+        // ==================== 左栏：AI 交互主内容区 ====================
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 12px;
+
+            // 1. 顶部 AI 标题与副标题区
+            HorizontalLayout {
+                height: 36px; spacing: 10px; alignment: start;
+                Rectangle {
+                    width: 32px; height: 32px; y: 2px;
+                    Path {
+                        x: 1px; y: 3px; width: 26px; height: 26px;
+                        commands: "M 13 0 L 16.5 9.5 L 26 13 L 16.5 16.5 L 13 26 L 9.5 16.5 L 0 13 L 9.5 9.5 Z";
+                        fill: @linear-gradient(135deg, #e9d5ff 0%, #a855f7 60%, #7e22ce 100%);
+                    }
+                    Path {
+                        x: 21px; y: 0px; width: 10px; height: 10px;
+                        commands: "M 5 0 L 6.3 3.7 L 10 5 L 6.3 6.3 L 5 10 L 3.7 6.3 L 0 5 L 3.7 3.7 Z";
+                        fill: #f0abfc;
+                    }
+                }
+                Text { text: "AI 功能"; color: #ffffff; font-size: 22px; font-weight: 800; vertical-alignment: center; }
+                Text { text: "用 AI 让你的 Minecraft 更简单、更有趣"; color: #cbd5e1; font-size: 12px; vertical-alignment: center; }
+            }
+
+            // 2. AI 需求输入框与发光紫边容器
+            Rectangle {
+                height: 104px;
+                Rectangle {
+                    x: -2px; y: -2px; width: parent.width + 4px; height: parent.height + 4px;
+                    border-radius: 14px; background: #9333ea22; border-width: 1px; border-color: #a855f744;
+                }
+                Rectangle {
+                    width: 100%; height: 100%; border-radius: 12px; background: #0d1522eb;
+                    border-width: 1.5px; border-color: prompt_input.has-focus ? #c084fc : #9333ea;
+
+                    VerticalLayout {
+                        padding-left: 14px; padding-right: 12px; padding-top: 10px; padding-bottom: 10px; spacing: 8px;
+
+                        HorizontalLayout {
+                            height: 34px; spacing: 10px; alignment: center;
+                            VectorIcon { width: 16px; height: 16px; y: (parent.height - self.height) / 2; kind: "ai"; icon_color: #c084fc; }
+
+                            Rectangle {
+                                horizontal-stretch: 1; height: 100%;
+                                if root.prompt_text == "": Text {
+                                    width: 100%; height: 100%; text: "请输入你的需求...";
+                                    color: #64748b; font-size: 13px; vertical-alignment: center;
+                                }
+                                prompt_input := TextInput {
+                                    width: 100%; height: 100%; text <=> root.prompt_text;
+                                    color: #f8fafc; font-size: 13px; vertical-alignment: center;
+                                    accepted => { root.submit_prompt(root.prompt_text, root.target_version, root.output_lang); }
+                                }
+                            }
+
+                            if root.attached_file != "": Rectangle {
+                                height: 22px; width: file_lbl.preferred-width + 24px; y: (parent.height - self.height) / 2;
+                                border-radius: 5px; background: #3b0764cc; border-width: 1px; border-color: #a855f788;
+                                HorizontalLayout {
+                                    padding-left: 7px; padding-right: 7px; spacing: 5px; alignment: center;
+                                    file_lbl := Text { text: root.attached_file; color: #e9d5ff; font-size: 10.5px; vertical-alignment: center; }
+                                    Path { width: 6px; height: 6px; y: (parent.height - self.height) / 2; commands: "M 0 0 L 6 6 M 6 0 L 0 6"; stroke: #e9d5ff; stroke-width: 1.3px; }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.attached_file = ""; root.action_triggered("已移除附加文件"); }
+                                }
+                            }
+                        }
+
+                        Rectangle { height: 1px; background: #1e2f42; }
+
+                        HorizontalLayout {
+                            height: 36px; spacing: 8px; alignment: center;
+
+                            // 添加文件胶囊按钮
+                            Rectangle {
+                                width: 122px; height: 32px; y: 2px; border-radius: 7px;
+                                background: attach_touch.has-hover ? #1b2c3d : #13202e;
+                                border-width: 1px; border-color: #263a4d;
+                                HorizontalLayout {
+                                    padding-left: 9px; padding-right: 8px; spacing: 6px; alignment: start;
+                                    VectorIcon { width: 13px; height: 13px; y: (parent.height - self.height) / 2; kind: "paperclip"; icon_color: #94a3b8; }
+                                    VerticalLayout {
+                                        alignment: center; spacing: 0px;
+                                        Text { text: "添加文件"; color: #e2e8f0; font-size: 11px; font-weight: 600; }
+                                        Text { text: "(整合包 / Mod)"; color: #64748b; font-size: 9px; }
+                                    }
+                                }
+                                attach_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        if (root.attached_file == "") {
+                                            root.attached_file = "All_the_Mods_9.zip";
+                                            root.action_triggered("已附加整合包文件：All_the_Mods_9.zip");
+                                        } else {
+                                            root.attached_file = "";
+                                            root.action_triggered("已取消附加文件");
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 目标版本下拉胶囊
+                            Rectangle {
+                                width: 124px; height: 32px; y: 2px; border-radius: 7px;
+                                background: ver_touch.has-hover ? #1b2c3d : #13202e;
+                                border-width: 1px; border-color: #263a4d;
+                                HorizontalLayout {
+                                    padding-left: 9px; padding-right: 9px; spacing: 5px; alignment: center;
+                                    VectorIcon { width: 13px; height: 13px; y: (parent.height - self.height) / 2; kind: "cube"; icon_color: #94a3b8; }
+                                    Text { text: "目标版本"; color: #94a3b8; font-size: 10.5px; vertical-alignment: center; }
+                                    Text { text: root.target_version; color: #f8fafc; font-size: 11.5px; font-weight: 700; vertical-alignment: center; }
+                                    Path { width: 7px; height: 5px; y: (parent.height - self.height) / 2; commands: "M 1 1 L 3.5 4 L 6 1"; stroke: #94a3b8; stroke-width: 1.3px; }
+                                }
+                                ver_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.version_index = mod(root.version_index + 1, root.version_options.length);
+                                        root.action_triggered("已切换 AI 目标游戏版本为：" + root.target_version);
+                                    }
+                                }
+                            }
+
+                            // 输出语言下拉胶囊
+                            Rectangle {
+                                width: 146px; height: 32px; y: 2px; border-radius: 7px;
+                                background: lang_touch.has-hover ? #1b2c3d : #13202e;
+                                border-width: 1px; border-color: #263a4d;
+                                HorizontalLayout {
+                                    padding-left: 9px; padding-right: 9px; spacing: 5px; alignment: center;
+                                    VectorIcon { width: 13px; height: 13px; y: (parent.height - self.height) / 2; kind: "globe"; icon_color: #94a3b8; }
+                                    Text { text: "输出语言"; color: #94a3b8; font-size: 10.5px; vertical-alignment: center; }
+                                    Text { text: root.output_lang; color: #f8fafc; font-size: 11.5px; font-weight: 700; vertical-alignment: center; }
+                                    Path { width: 7px; height: 5px; y: (parent.height - self.height) / 2; commands: "M 1 1 L 3.5 4 L 6 1"; stroke: #94a3b8; stroke-width: 1.3px; }
+                                }
+                                lang_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.lang_index = mod(root.lang_index + 1, root.lang_options.length);
+                                        root.action_triggered("已切换 AI 输出语言为：" + root.output_lang);
+                                    }
+                                }
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+
+                            // 联网搜索 + 紫色胶囊开关
+                            HorizontalLayout {
+                                spacing: 7px; alignment: center;
+                                Text { text: "联网搜索"; color: #cbd5e1; font-size: 11.5px; vertical-alignment: center; }
+                                Rectangle {
+                                    width: 36px; height: 20px; y: (parent.height - self.height) / 2; border-radius: 10px;
+                                    background: root.web_search_enabled ? #9333ea : #263542;
+                                    border-width: 1px; border-color: root.web_search_enabled ? #c084fc : #364958;
+                                    Rectangle {
+                                        x: root.web_search_enabled ? parent.width - self.width - 2px : 2px;
+                                        y: 2px; width: 16px; height: 16px; border-radius: 8px; background: #ffffff;
+                                        animate x { duration: 140ms; easing: ease-out; }
+                                    }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.web_search_enabled = !root.web_search_enabled;
+                                            root.action_triggered(root.web_search_enabled ? "已开启 AI 联网搜索增强" : "已关闭 AI 联网搜索");
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 右侧紫色发送纸飞机按钮
+                            Rectangle {
+                                width: 42px; height: 32px; y: 2px; border-radius: 8px;
+                                background: send_touch.pressed ? #7e22ce : (send_touch.has-hover ? #a855f7 : #9333ea);
+                                border-width: 1px; border-color: #c084fc88;
+                                VectorIcon { x: 13px; y: 8px; width: 16px; height: 16px; kind: "send"; icon_color: #ffffff; }
+                                send_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.submit_prompt(root.prompt_text, root.target_version, root.output_lang); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. 「你可以这样问」2x4 快捷提问区
+            VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    height: 22px; spacing: 7px; alignment: center;
+                    VectorIcon { width: 15px; height: 15px; y: (parent.height - self.height) / 2; kind: "bulb"; icon_color: #c084fc; }
+                    Text { text: "你可以这样问"; color: #f1f5f9; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 62px; height: 22px; border-radius: 5px;
+                        background: refresh_touch.has-hover ? #1e293b88 : transparent;
+                        HorizontalLayout {
+                            alignment: end; spacing: 5px;
+                            VectorIcon { width: 12px; height: 12px; y: (parent.height - self.height) / 2; kind: "refresh"; icon_color: refresh_touch.has-hover ? #e2e8f0 : #94a3b8; }
+                            Text { text: "换一批"; color: refresh_touch.has-hover ? #e2e8f0 : #94a3b8; font-size: 11.5px; vertical-alignment: center; }
+                        }
+                        refresh_touch := TouchArea { mouse-cursor: pointer; clicked => { root.cycle_prompts_clicked(); } }
+                    }
+                }
+
+                prompt_grid := Rectangle {
+                    height: 84px;
+                    property <length> gap: 8px;
+                    property <length> cell_w: (self.width - self.gap * 3) / 4;
+                    property <length> cell_h: 38px;
+
+                    for item[idx] in root.quick_prompts: Rectangle {
+                        x: mod(idx, 4) * (prompt_grid.cell_w + prompt_grid.gap);
+                        y: floor(idx / 4) * (prompt_grid.cell_h + prompt_grid.gap);
+                        width: prompt_grid.cell_w; height: prompt_grid.cell_h;
+                        border-radius: 8px;
+                        background: p_touch.has-hover ? #162636ee : #0e1923dc;
+                        border-width: 1px; border-color: p_touch.has-hover ? #a855f788 : #1e3142;
+
+                        HorizontalLayout {
+                            padding-left: 9px; padding-right: 9px; spacing: 7px; alignment: center;
+                            Rectangle {
+                                width: 22px; height: 22px; y: (parent.height - self.height) / 2;
+                                border-radius: 5px; background: #172736;
+                                VectorIcon { x: 4px; y: 4px; width: 14px; height: 14px; kind: item.icon_kind; icon_color: item.icon_color; }
+                            }
+                            Text {
+                                text: item.title; color: #e2e8f0; font-size: 11px; font-weight: 500;
+                                vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
+                            }
+                            Path {
+                                width: 5px; height: 8px; y: (parent.height - self.height) / 2;
+                                commands: "M 1 1 L 4 4 L 1 7";
+                                stroke: p_touch.has-hover ? #c084fc : #64748b; stroke-width: 1.3px;
+                            }
+                        }
+
+                        p_touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.prompt_text = item.title;
+                                root.action_triggered("已填入快捷提问：「" + item.title + "」");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. 「实用示例」毛玻璃大卡片与横向 4 卡片展示
+            GlassCard {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 12px; spacing: 10px;
+                    CardHeader { icon_kind: "bulb"; icon_color: #fbbf24; title: "实用示例"; }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        HorizontalLayout {
+                            spacing: 10px;
+                            for card in root.showcases: AiShowcaseCard {
+                                entry: card;
+                                clicked => {
+                                    root.prompt_text = "帮我按照「" + card.title + "」示例生成 " + root.target_version + " 配置";
+                                    root.select_showcase(card.id);
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            x: -6px; y: (parent.height - self.height) / 2; width: 24px; height: 24px; border-radius: 12px;
+                            background: prev_touch.has-hover ? #1e293bee : #0f172acc; border-width: 1px; border-color: #334155;
+                            Path { x: 8px; y: 7px; width: 6px; height: 10px; commands: "M 5 1 L 1 5 L 5 9"; stroke: #cbd5e1; stroke-width: 1.5px; }
+                            prev_touch := TouchArea { mouse-cursor: pointer; clicked => { root.action_triggered("已切换至上一组实用示例预览"); } }
+                        }
+
+                        Rectangle {
+                            x: parent.width - 18px; y: (parent.height - self.height) / 2; width: 24px; height: 24px; border-radius: 12px;
+                            background: next_touch.has-hover ? #1e293bee : #0f172acc; border-width: 1px; border-color: #334155;
+                            Path { x: 9px; y: 7px; width: 6px; height: 10px; commands: "M 1 1 L 5 5 L 1 9"; stroke: #cbd5e1; stroke-width: 1.5px; }
+                            next_touch := TouchArea { mouse-cursor: pointer; clicked => { root.action_triggered("已切换至下一组实用示例预览"); } }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== 右栏：任务列表 (固定宽度 268px) ====================
+        GlassCard {
+            width: 268px;
+            VerticalLayout {
+                padding: 12px; spacing: 10px;
+                CardHeader {
+                    icon_kind: "cube"; icon_color: #a855f7;
+                    title: "任务列表 (" + root.ai_tasks.length + ")";
+                    action_text: "全部任务"; action_color: #38bdf8;
+                    action_clicked => { root.action_triggered("正在查看全部 AI 任务历史记录"); }
+                }
+
+                task_list_box := Rectangle {
+                    vertical-stretch: 1; clip: true;
+                    property <length> content_h: task_col.preferred-height;
+                    property <length> max_scroll: max(0px, self.content_h - self.height);
+                    property <length> safe_max_scroll: max(1px, self.max_scroll);
+
+                    TouchArea {
+                        width: 100%; height: 100%;
+                        scroll-event(ev) => {
+                            if (task_list_box.max_scroll > 0px) {
+                                task_flick.viewport-y = max(-task_list_box.max_scroll, min(0px, task_flick.viewport-y + ev.delta-y * 0.6));
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+
+                    task_flick := Flickable {
+                        width: parent.width - (task_list_box.max_scroll > 0px ? 6px : 0px);
+                        height: 100%; viewport-width: self.width; viewport-height: task_list_box.content_h;
+
+                        task_col := VerticalLayout {
+                            width: parent.width; spacing: 10px; alignment: start;
+                            for t in root.ai_tasks: AiTaskCard {
+                                task: t;
+                                toggle_clicked => { root.toggle_ai_task(t.id); }
+                                remove_clicked => { root.remove_ai_task(t.id); }
+                                scroll_delta(dy) => {
+                                    if (task_list_box.max_scroll > 0px) {
+                                        task_flick.viewport-y = max(-task_list_box.max_scroll, min(0px, task_flick.viewport-y + dy * 0.6));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if task_list_box.max_scroll > 0px: SlimScrollbar {
+                        x: parent.width - 3px; y: 0px; height: 100%;
+                        visible_ratio: task_list_box.height / max(1px, task_list_box.content_h);
+                        scroll_progress: (-task_flick.viewport-y) / task_list_box.safe_max_scroll;
+                    }
+                }
+            }
+        }
+    }
+}

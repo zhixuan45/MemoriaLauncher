@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod model;
+pub mod runtime;
 pub mod service;
 
 pub use error::{LauncherError, LauncherResult};
@@ -11,9 +12,9 @@ pub use model::{
     plan::{InstallPlan, PlanAction, PlanOperation},
     task::{Task, TaskProgress, TaskStatus, TaskType},
 };
+pub use runtime::*;
 pub use service::{
     catalog::{CatalogProvider, MockCatalogProvider},
     instance::{InstanceService, MockInstanceService},
     task::{InMemoryTaskService, TaskService},
 };
-

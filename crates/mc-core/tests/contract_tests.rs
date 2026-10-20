@@ -9,8 +9,8 @@ async fn test_instance_service_contract() {
 
     // 验证初始样例实例
     let list = service.list_instances().await.expect("获取实例列表失败");
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].id, "inst-default");
+    assert_eq!(list.len(), 4);
+    assert!(list.iter().any(|inst| inst.id == "inst-fabric-121"));
 
     // 验证新建实例
     let new_inst = service
@@ -25,9 +25,9 @@ async fn test_instance_service_contract() {
     assert_eq!(new_inst.name, "测试纯净版");
     assert_eq!(new_inst.mc_version, "1.20.1");
 
-    // 再次获取应有 2 个实例
+    // 再次获取应有 5 个实例
     let updated_list = service.list_instances().await.expect("获取更新列表失败");
-    assert_eq!(updated_list.len(), 2);
+    assert_eq!(updated_list.len(), 5);
 }
 
 #[tokio::test]

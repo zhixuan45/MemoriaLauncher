@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::error::{LauncherError, LauncherResult};
-use crate::model::{CreateInstanceRequest, Instance};
+use crate::model::{CreateInstanceRequest, Instance, LoaderInfo, LoaderType};
 
 /// 实例管理服务接口
 #[async_trait]
@@ -34,16 +34,59 @@ impl MockInstanceService {
 
     /// 注入初始测试数据
     pub async fn with_sample_data(self) -> Self {
-        let sample = Instance {
-            id: "inst-default".to_string(),
-            name: "默认原版 1.21.1".to_string(),
-            mc_version: "1.21.1".to_string(),
-            loader: None,
-            game_dir: PathBuf::from("instances/inst-default"),
-            created_at: Utc::now(),
-            last_played_at: None,
-        };
-        self.instances.write().await.insert(sample.id.clone(), sample);
+        let now = Utc::now();
+        let samples = vec![
+            Instance {
+                id: "inst-fabric-121".to_string(),
+                name: "Fabric 1.21".to_string(),
+                mc_version: "1.21".to_string(),
+                loader: Some(LoaderInfo {
+                    loader_type: LoaderType::Fabric,
+                    version: "0.16.0".to_string(),
+                }),
+                game_dir: PathBuf::from("D:\\MC\\Instances\\Fabric-1.21"),
+                created_at: now,
+                last_played_at: Some(now),
+            },
+            Instance {
+                id: "inst-vanilla-121".to_string(),
+                name: "原版 1.21".to_string(),
+                mc_version: "1.21".to_string(),
+                loader: None,
+                game_dir: PathBuf::from("D:\\MC\\Instances\\Vanilla-1.21"),
+                created_at: now,
+                last_played_at: None,
+            },
+            Instance {
+                id: "inst-forge-1192".to_string(),
+                name: "Forge 1.19.2".to_string(),
+                mc_version: "1.19.2".to_string(),
+                loader: Some(LoaderInfo {
+                    loader_type: LoaderType::Forge,
+                    version: "43.3.0".to_string(),
+                }),
+                game_dir: PathBuf::from("D:\\MC\\Instances\\Forge-1.19.2"),
+                created_at: now,
+                last_played_at: None,
+            },
+            Instance {
+                id: "inst-modpack-1201".to_string(),
+                name: "整合包实例".to_string(),
+                mc_version: "1.20.1".to_string(),
+                loader: Some(LoaderInfo {
+                    loader_type: LoaderType::Fabric,
+                    version: "Modpack".to_string(),
+                }),
+                game_dir: PathBuf::from("D:\\MC\\Instances\\Modpack-1.20.1"),
+                created_at: now,
+                last_played_at: None,
+            },
+        ];
+        let mut map = self.instances.write().await;
+        for s in samples {
+            map.insert(s.id.clone(), s);
+        }
+        drop(map);
         self
     }
 }

@@ -1,0 +1,612 @@
+// 全局共享数据模型与通用纯矢量原子组件库
+
+// 实例列表与当前实例数据模型
+export struct InstanceEntry {
+    id: string,
+    name: string,
+    version_tag: string,
+    loader_tag: string,
+    java_tag: string,
+    subtitle: string,
+    status: string,      // "active" | "installed" | "uninstalled"
+    status_text: string, // "当前使用" | "已安装" | "未安装"
+    icon_type: string,   // "grass" | "anvil" | "modpack"
+    game_dir: string,
+    play_time: string,
+    mod_count: string,
+}
+
+// 更新日志后端数据模型
+export struct ChangelogEntry {
+    version: string,
+    date: string,
+    badge_kind: string, // "latest" | "normal" | "warning"
+    line_1: string,
+    line_2: string,
+    line_3: string,
+}
+
+// 任务队列后端数据模型
+export struct TaskEntry {
+    id: string,
+    title: string,
+    progress: float,       // 0.0 .. 1.0
+    progress_text: string, // 如 "684 MB / 1.2 GB (56%)"
+    speed_text: string,    // 如 "12.3 MB/s"
+    status: string,        // "running" | "paused" | "cancelled"
+    icon_type: string,     // "grass" | "sodium" | "anvil" | "modpack"
+}
+
+// 玩家账号/档案后端数据模型
+export struct PlayerProfile {
+    id: string,
+    username: string,
+    uuid: string,         // 正版玩家 UUID
+    account_type: string, // 如 "Microsoft 正版" | "离线档案"
+    avatar: image,        // 正版皮肤 8x8 面部 + 8x8 帽子合成纹理
+    has_avatar: bool,     // 是否已加载正版皮肤头部纹理
+    skin_tint: color,     // 离线或未加载皮肤时的回退色调
+    online: bool,
+}
+
+// 游戏下载页版本条目后端数据模型（由 mc-core CatalogProvider::list_game_versions 映射注入）
+export struct DownloadVersionEntry {
+    id: string,                // 如 "1.21"
+    title: string,             // 如 "Minecraft 1.21"
+    release_badge: string,     // 如 "正式版" | "快照版"
+    type_badge: string,        // 如 "原版"
+    release_date: string,      // 如 "2024-06-13"
+    java_tag: string,          // 如 "Java 21"
+    supported_loaders: string, // 如 "原版 / Fabric / Forge"
+    summary: string,           // 版本介绍摘要段落
+    changelog_url: string,     // 官方更新日志链接
+    // 子页签 0：版本介绍要点
+    feature_1: string,
+    feature_2: string,
+    feature_3: string,
+    feature_4: string,
+    feature_5: string,
+    // 子页签 1：版本文件清单
+    file_1: string,
+    file_2: string,
+    file_3: string,
+    file_4: string,
+    file_5: string,
+    // 子页签 2：系统配置要求
+    req_1: string,
+    req_2: string,
+    req_3: string,
+    req_4: string,
+    req_5: string,
+    // 子页签 3：兼容相关资源
+    res_1: string,
+    res_2: string,
+    res_3: string,
+    res_4: string,
+    res_5: string,
+}
+
+// AI 功能快捷提问后端数据模型
+export struct AiPromptEntry {
+    id: string,
+    title: string,
+    icon_kind: string,
+    icon_color: color,
+}
+
+// AI 功能实用示例卡片后端数据模型
+export struct AiShowcaseEntry {
+    id: string,
+    title: string,
+    tag_1: string,
+    tag_2: string,
+    tag_3: string,
+    description: string,
+    theme_kind: string, // "rpg" | "tech" | "shader" | "custom"
+}
+
+// AI 任务列表单项后端数据模型
+export struct AiTaskEntry {
+    id: string,
+    title: string,
+    subtitle: string,
+    icon_kind: string,
+    icon_color: color,
+    bar_color: color,
+    progress: float,
+    progress_label: string,
+    speed_text: string,
+    status: string,       // "running" | "paused"
+    has_steps: bool,
+    step_1: string,
+    step_1_state: string, // "done" | "active" | "pending" | ""
+    step_2: string,
+    step_2_state: string,
+    step_3: string,
+    step_3_state: string,
+    step_4: string,
+    step_4_state: string,
+    step_5: string,
+    step_5_state: string,
+}
+
+// 统一深色毛玻璃卡片容器外壳
+export component GlassCard inherits Rectangle {
+    border-radius: 12px;
+    background: #0c1720e8;
+    border-width: 1px;
+    border-color: #1c2e3c;
+    @children
+}
+
+// 统一纯矢量图标组件（彻底替代 Emoji 与特殊 Unicode 符号，杜绝方框乱码）
+export component VectorIcon inherits Rectangle {
+    in property <string> kind: "cube";
+    in property <color> icon_color: #cbd5e1;
+
+    width: 16px;
+    height: 16px;
+
+    if root.kind == "home": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1.5 L 1 8 L 3 8 L 3 14.5 L 6.5 14.5 L 6.5 10.5 L 9.5 10.5 L 9.5 14.5 L 13 14.5 L 13 8 L 15 8 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "download": Path {
+        width: 100%; height: 100%;
+        commands: "M 7 1 L 9 1 L 9 8 L 12 5 L 13.5 6.5 L 8 12 L 2.5 6.5 L 4 5 L 7 8 Z M 2 13 L 14 13 L 14 15 L 2 15 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "upload": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1 L 13 6 L 9.5 6 L 9.5 11 L 6.5 11 L 6.5 6 L 3 6 Z M 2 13 L 14 13 L 14 15 L 2 15 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "ai": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1 L 9.8 6.2 L 15 8 L 9.8 9.8 L 8 15 L 6.2 9.8 L 1 8 L 6.2 6.2 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "gear" || root.kind == "settings": Path {
+        width: 100%; height: 100%;
+        commands: "M 7 1 L 9 1 L 9.6 3 L 11.5 4 L 13.5 3 L 15 4.8 L 13.5 6.5 L 14 8.5 L 15.5 10 L 14 12 L 12 11 L 10 12.2 L 9 14.5 L 7 14.5 L 6 12.2 L 4 11 L 2 12 L 0.5 10 L 2 8.5 L 2.5 6.5 L 1 4.8 L 2.5 3 L 4.5 4 L 6.4 3 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "shield": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1 L 14 3.5 L 14 8 C 14 11.5 11.5 14 8 15.5 C 4.5 14 2 11.5 2 8 L 2 3.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "clock": Rectangle {
+        width: 100%; height: 100%;
+        border-radius: self.width / 2;
+        border-width: 1.6px;
+        border-color: root.icon_color;
+        Path {
+            x: 4px; y: 3px; width: 8px; height: 8px;
+            commands: "M 4 1 L 4 5 L 7 5";
+            stroke: root.icon_color;
+            stroke-width: 1.5px;
+        }
+    }
+    if root.kind == "gamepad": Path {
+        width: 100%; height: 100%;
+        commands: "M 3 2.5 L 13 2.5 C 15 2.5 16 4.5 16 8 C 16 11.5 15 13 13 13 L 10.5 10 L 5.5 10 L 3 13 C 1 13 0 11.5 0 8 C 0 4.5 1 2.5 3 2.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "cube": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1 L 15 5 L 15 13 L 8 17 L 1 13 L 1 5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "folder": Path {
+        width: 100%; height: 100%;
+        commands: "M 1 2 L 6 2 L 8 4 L 15 4 L 15 13 L 1 13 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "cloud": Path {
+        width: 100%; height: 100%;
+        commands: "M 4 12.5 L 13 12.5 C 15 12.5 16 11 16 9 C 16 7 14.5 6 13 6 C 12.5 3 10 1.5 7.5 1.5 C 4.5 1.5 2.5 3.5 2.5 6.5 C 1 7 0 8.5 0 10 C 0 11.5 1.5 12.5 4 12.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "trash": Path {
+        width: 100%; height: 100%;
+        commands: "M 4.5 1 L 11.5 1 L 11.5 3 L 14.5 3 L 14.5 4.5 L 1.5 4.5 L 1.5 3 L 4.5 3 Z M 3 5.5 L 13 5.5 L 12.2 14.5 L 3.8 14.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "bolt": Path {
+        width: 100%; height: 100%;
+        commands: "M 9 1 L 2.5 9 L 7.5 9 L 6.5 15 L 13 7 L 8 7 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "user": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1 C 10.2 1 11.8 2.6 11.8 4.8 C 11.8 7 10.2 8.5 8 8.5 C 5.8 8.5 4.2 7 4.2 4.8 C 4.2 2.6 5.8 1 8 1 Z M 1.5 15 C 1.5 11.2 4.2 9.8 8 9.8 C 11.8 9.8 14.5 11.2 14.5 15 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "play": Path {
+        width: 100%; height: 100%;
+        commands: "M 2 1.5 L 13 8 L 2 14.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "refresh": Path {
+        width: 100%; height: 100%;
+        commands: "M 3 5 A 5.5 5.5 0 1 1 3.5 11 M 1.5 2 L 3 5.5 L 6.5 4.5";
+        stroke: root.icon_color;
+        stroke-width: 1.5px;
+    }
+    if root.kind == "env": Path {
+        width: 100%; height: 100%;
+        commands: "M 2 4 L 11 4 L 11 10 C 11 12 9.5 13 6.5 13 C 3.5 13 2 12 2 10 Z M 11 5 L 13.5 5 C 14.5 5 14.5 8.5 13.5 8.5 L 11 8.5 M 1 14.5 L 13 14.5";
+        stroke: root.icon_color;
+        stroke-width: 1.4px;
+    }
+    if root.kind == "theme": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1 C 12 1 15 4 15 7.5 C 15 9.5 13.5 10.5 12 10.5 L 10 10.5 C 9 10.5 9 11.5 9.5 12.5 C 10 13.5 9 14.5 8 14.5 C 4 14.5 1 11.5 1 7.5 C 1 4 4 1 8 1 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "advanced": Path {
+        width: 100%; height: 100%;
+        commands: "M 10.5 2 C 12.5 2 14.5 3.5 14 6 L 6.5 13.5 C 5 15 2.5 13.5 3 11.5 L 10 4.5 L 8.5 3 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "globe": Rectangle {
+        width: 100%; height: 100%;
+        border-radius: self.width / 2;
+        border-width: 1.5px;
+        border-color: root.icon_color;
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 1 8 L 15 8 M 8 1 C 11 4 11 12 8 15 M 8 1 C 5 4 5 12 8 15";
+            stroke: root.icon_color;
+            stroke-width: 1.2px;
+        }
+    }
+    if root.kind == "puzzle": Path {
+        width: 100%; height: 100%;
+        commands: "M 6 1 C 7.5 1 8.5 2 8.5 3 L 12 3 L 12 6.5 C 13 6.5 14 7.5 14 9 C 14 10.5 13 11.5 12 11.5 L 12 14.5 L 2.5 14.5 L 2.5 11 C 3.5 11 4.5 10 4.5 9 C 4.5 8 3.5 7 2.5 7 L 2.5 3 L 4 3 C 4 2 4.8 1 6 1 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "brush": Path {
+        width: 100%; height: 100%;
+        commands: "M 12.5 1.5 L 14.5 3.5 L 8.5 9.5 L 6.5 7.5 Z M 5.5 8.5 L 7.5 10.5 C 6.5 12.5 4.5 14 2 14 C 2.5 12.2 3.2 10 5.5 8.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "sun": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 4.2 C 10.1 4.2 11.8 5.9 11.8 8 C 11.8 10.1 10.1 11.8 8 11.8 C 5.9 11.8 4.2 10.1 4.2 8 C 4.2 5.9 5.9 4.2 8 4.2 Z M 7.3 0.8 L 8.7 0.8 L 8.7 2.8 L 7.3 2.8 Z M 7.3 13.2 L 8.7 13.2 L 8.7 15.2 L 7.3 15.2 Z M 0.8 7.3 L 2.8 7.3 L 2.8 8.7 L 0.8 8.7 Z M 13.2 7.3 L 15.2 7.3 L 15.2 8.7 L 13.2 8.7 Z M 2.4 2.4 L 3.8 2.4 L 4.6 3.8 L 3.4 4.6 Z M 12.6 11.4 L 13.8 12.2 L 13 13.6 L 11.6 12.8 Z M 12.2 2.4 L 13.6 3.2 L 12.6 4.6 L 11.4 3.8 Z M 3.4 11.4 L 4.6 12.2 L 3.6 13.6 L 2.4 12.8 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "star": Path {
+        width: 100%; height: 100%;
+        commands: "M 8 1 L 10.1 5.4 L 15 6.1 L 11.4 9.5 L 12.3 14.4 L 8 12.1 L 3.7 14.4 L 4.6 9.5 L 1 6.1 L 5.9 5.4 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "external": Path {
+        width: 100%; height: 100%;
+        commands: "M 9 2 L 14 2 L 14 7 M 14 2 L 7.5 8.5 M 12 9.5 L 12 13.5 L 2.5 13.5 L 2.5 4 L 6.5 4";
+        stroke: root.icon_color;
+        stroke-width: 1.5px;
+    }
+    if root.kind == "calendar": Path {
+        width: 100%; height: 100%;
+        commands: "M 2 3.5 L 14 3.5 L 14 14 L 2 14 Z M 2 6.5 L 14 6.5 M 5 1.5 L 5 4.5 M 11 1.5 L 11 4.5";
+        stroke: root.icon_color;
+        stroke-width: 1.4px;
+    }
+    if root.kind == "dots": Rectangle {
+        width: 100%; height: 100%;
+        Rectangle { x: (parent.width - 3px) / 2; y: 2px; width: 3px; height: 3px; border-radius: 1.5px; background: root.icon_color; }
+        Rectangle { x: (parent.width - 3px) / 2; y: 6.5px; width: 3px; height: 3px; border-radius: 1.5px; background: root.icon_color; }
+        Rectangle { x: (parent.width - 3px) / 2; y: 11px; width: 3px; height: 3px; border-radius: 1.5px; background: root.icon_color; }
+    }
+    if root.kind == "paperclip": Path {
+        width: 100%; height: 100%;
+        commands: "M 10.5 4.5 L 5.5 9.5 C 4.5 10.5 3 10.5 2 9.5 C 1 8.5 1 7 2 6 L 8 0.5 C 9.8 -1 12.5 -1 14 0.8 C 15.5 2.5 15.5 5.2 14 7 L 7.5 13.5 C 5.2 15.5 2 15.5 0.5 13.5";
+        stroke: root.icon_color;
+        stroke-width: 1.5px;
+    }
+    if root.kind == "send": Path {
+        width: 100%; height: 100%;
+        commands: "M 1.5 7.5 L 14.5 1.5 L 10.5 14.5 L 7.2 9.5 L 12 4.5 L 5.8 8.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "bulb": Rectangle {
+        width: 100%; height: 100%;
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 8 1 C 4.8 1 2.5 3.3 2.5 6.2 C 2.5 8.2 3.8 9.8 5.2 10.8 L 5.5 12.2 L 10.5 12.2 L 10.8 10.8 C 12.2 9.8 13.5 8.2 13.5 6.2 C 13.5 3.3 11.2 1 8 1 Z";
+            fill: root.icon_color;
+        }
+        Rectangle { x: 5.5px; y: 13px; width: 5px; height: 1.4px; border-radius: 0.7px; background: root.icon_color; }
+        Rectangle { x: 6.5px; y: 14.8px; width: 3px; height: 1.2px; border-radius: 0.6px; background: root.icon_color; }
+    }
+    if root.kind == "mountain": Rectangle {
+        width: 100%; height: 100%;
+        border-radius: 3px;
+        border-width: 1.2px;
+        border-color: root.icon_color;
+        Rectangle { x: 3px; y: 3px; width: 3px; height: 3px; border-radius: 1.5px; background: #fbbf24; }
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 1.5 13.5 L 6 7.5 L 9.5 11.5 L 12 8.5 L 14.5 13.5 Z";
+            fill: root.icon_color;
+        }
+    }
+    if root.kind == "translate": Rectangle {
+        width: 100%; height: 100%;
+        border-radius: 3px;
+        background: root.icon_color;
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 3 4.5 L 9 4.5 M 6 2.5 L 6 4.5 M 4.2 4.5 C 4.5 7.5 6.5 9.5 9 10.8 M 7.8 4.5 C 7.2 7.5 5.2 9.5 2.8 10.8 M 9.5 13.5 L 11.5 7.5 L 13.5 13.5 M 10.1 11.8 L 12.9 11.8";
+            stroke: #ffffff;
+            stroke-width: 1.3px;
+        }
+    }
+    if root.kind == "wrench": Path {
+        width: 100%; height: 100%;
+        commands: "M 11.5 1.5 C 9.5 1.5 8 3 8 5 C 8 5.6 8.2 6.2 8.4 6.7 L 2.2 12.9 C 1.5 13.6 1.5 14.6 2.2 15.2 C 2.8 15.8 3.8 15.8 4.5 15.2 L 10.7 9 C 11.2 9.2 11.8 9.4 12.4 9.4 C 14.4 9.4 15.8 7.9 15.8 5.9 L 13.2 8.2 L 10.8 7.5 L 10.1 5.1 L 12.5 2.7 C 12.1 1.8 11.8 1.5 11.5 1.5 Z";
+        fill: root.icon_color;
+    }
+    if root.kind == "code_doc": Rectangle {
+        width: 100%; height: 100%;
+        border-radius: 2.5px;
+        border-width: 1.4px;
+        border-color: root.icon_color;
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 4 5.5 L 6.5 8 L 4 10.5 M 7.5 10.5 L 11.5 10.5 M 4 3.5 L 11.5 3.5";
+            stroke: root.icon_color;
+            stroke-width: 1.3px;
+        }
+    }
+    if root.kind == "palette": Rectangle {
+        width: 100%; height: 100%;
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 8 1 C 12.2 1 15 3.8 15 7.5 C 15 9.5 13.6 10.8 11.8 10.8 L 10.2 10.8 C 9.3 10.8 9.2 11.6 9.6 12.5 C 10 13.6 9.2 14.8 7.8 14.8 C 3.8 14.8 1 11.8 1 7.8 C 1 3.8 4 1 8 1 Z";
+            fill: root.icon_color;
+        }
+        Rectangle { x: 4px; y: 4.5px; width: 2.2px; height: 2.2px; border-radius: 1.1px; background: #0f172a; }
+        Rectangle { x: 7.5px; y: 3.2px; width: 2.2px; height: 2.2px; border-radius: 1.1px; background: #0f172a; }
+        Rectangle { x: 10.8px; y: 5px; width: 2.2px; height: 2.2px; border-radius: 1.1px; background: #0f172a; }
+        Rectangle { x: 4.2px; y: 8.5px; width: 2.2px; height: 2.2px; border-radius: 1.1px; background: #0f172a; }
+    }
+    if root.kind == "help_bubble": Rectangle {
+        width: 100%; height: 100%;
+        border-radius: 8px;
+        background: root.icon_color;
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 6.2 5.5 C 6.2 4 7.2 3.2 8.2 3.2 C 9.3 3.2 10.2 4 10.2 5.2 C 10.2 6.2 9.4 6.8 8.5 7.4 C 8 7.8 7.8 8.3 7.8 9.2";
+            stroke: #08121a;
+            stroke-width: 1.5px;
+        }
+        Rectangle { x: 7.2px; y: 11px; width: 1.8px; height: 1.8px; border-radius: 0.9px; background: #08121a; }
+    }
+    if root.kind == "modpack_box": Rectangle {
+        width: 100%; height: 100%;
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 8 1 L 14.5 4.5 L 8 8 L 1.5 4.5 Z";
+            fill: root.icon_color;
+        }
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 1.5 4.5 L 8 8 L 8 15 L 1.5 11.5 Z";
+            fill: root.icon_color.darker(0.25);
+        }
+        Path {
+            width: 100%; height: 100%;
+            commands: "M 8 8 L 14.5 4.5 L 14.5 11.5 L 8 15 Z";
+            fill: root.icon_color.darker(0.5);
+        }
+    }
+}
+
+// 统一卡片顶部栏（左侧图标 + 标题 + 右侧可选动作按钮）
+export component CardHeader inherits HorizontalLayout {
+    in property <string> icon_kind: "cube";
+    in property <color> icon_color: #00e58b;
+    in property <string> title: "";
+    in property <string> action_text: "";
+    in property <color> action_color: #38bdf8;
+    callback action_clicked();
+
+    height: 22px;
+    spacing: 7px;
+
+    VectorIcon {
+        width: 15px;
+        height: 15px;
+        y: (parent.height - self.height) / 2;
+        kind: root.icon_kind;
+        icon_color: root.icon_color;
+    }
+
+    Text {
+        text: root.title;
+        color: #f1f5f9;
+        font-size: 13px;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+
+    Rectangle { horizontal-stretch: 1; }
+
+    if root.action_text != "": Rectangle {
+        width: act_lbl.preferred-width + 12px;
+        height: 20px;
+
+        HorizontalLayout {
+            spacing: 4px;
+            alignment: end;
+
+            act_lbl := Text {
+                text: root.action_text;
+                color: root.action_color;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+
+            Path {
+                width: 5px;
+                height: 8px;
+                y: (parent.height - self.height) / 2;
+                commands: "M 1 1 L 4 4 L 1 7";
+                stroke: root.action_color;
+                stroke-width: 1.4px;
+            }
+        }
+
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.action_clicked(); }
+        }
+    }
+}
+
+// 统一迷你滚动条指示器
+export component SlimScrollbar inherits Rectangle {
+    in property <float> visible_ratio: 0.5;
+    in property <float> scroll_progress: 0.0;
+
+    width: 3px;
+    border-radius: 1.5px;
+    background: #172a38;
+
+    Rectangle {
+        width: 100%;
+        height: max(20px, parent.height * max(0.1, min(1.0, root.visible_ratio)));
+        y: (parent.height - self.height) * max(0.0, min(1.0, root.scroll_progress));
+        border-radius: 1.5px;
+        background: #00e58b99;
+    }
+}
+
+// 统一胶囊开关组件
+export component ToggleSwitch inherits Rectangle {
+    in-out property <bool> checked: false;
+    callback toggled(bool);
+
+    width: 38px;
+    height: 20px;
+    border-radius: 10px;
+    background: root.checked ? #00e58b : #263542;
+    border-width: 1px;
+    border-color: root.checked ? #00e58b : #364958;
+
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 2px : 2px;
+        y: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: #ffffff;
+        animate x { duration: 140ms; easing: ease-out; }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+// 统一标签胶囊组件
+export component TagPill inherits Rectangle {
+    in property <string> text;
+    in property <bool> is_status: false;
+
+    height: 20px;
+    width: lbl.preferred-width + (root.is_status ? 22px : 14px);
+    border-radius: 5px;
+    background: root.is_status ? #003828cc : #182631cc;
+    border-width: 1px;
+    border-color: root.is_status ? #00e58b55 : #2c3e4c;
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 4px;
+        alignment: center;
+
+        if root.is_status: Rectangle {
+            width: 6px;
+            height: 6px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: #00e58b;
+        }
+
+        lbl := Text {
+            text: root.text;
+            color: root.is_status ? #00e58b : #cbd5e1;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// 统一玩家头像组件（优先以像素采样渲染正版玩家皮肤头部图像，未获取或离线时回退至矢量像素头像）
+export component PlayerAvatar inherits Rectangle {
+    in property <image> avatar;
+    in property <bool> has_avatar: false;
+    in property <color> hair_color: #3b2314;
+    in property <bool> online: true;
+    in property <bool> show_status_dot: true;
+
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
+    background: #d29c76;
+    border-width: 1px;
+    border-color: #2c4050;
+
+    if root.has_avatar: Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 6px;
+        clip: true;
+
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.avatar;
+            image-fit: cover;
+            image-rendering: pixelated;
+        }
+    }
+
+    if !root.has_avatar: Rectangle {
+        width: 100%;
+        height: 100%;
+
+        Rectangle { x: 2px; y: 2px; width: 30px; height: 9px; border-radius: 4px; background: root.hair_color; }
+        Rectangle { x: 2px; y: 8px; width: 5px; height: 6px; background: root.hair_color; }
+        Rectangle { x: 27px; y: 8px; width: 5px; height: 6px; background: root.hair_color; }
+
+        Rectangle { x: 7px; y: 16px; width: 6px; height: 4px; background: #ffffff; }
+        Rectangle { x: 10px; y: 16px; width: 3px; height: 4px; background: #3b3285; }
+        Rectangle { x: 21px; y: 16px; width: 6px; height: 4px; background: #ffffff; }
+        Rectangle { x: 21px; y: 16px; width: 3px; height: 4px; background: #3b3285; }
+
+        Rectangle { x: 15px; y: 20px; width: 4px; height: 3px; background: #b57b55; }
+        Rectangle { x: 11px; y: 25px; width: 12px; height: 4px; background: #6b3b23; }
+    }
+
+    if root.show_status_dot: Rectangle {
+        x: parent.width - 9px;
+        y: parent.height - 9px;
+        width: 9px;
+        height: 9px;
+        border-radius: 4.5px;
+        background: root.online ? #00e58b : #64748b;
+        border-width: 1.5px;
+        border-color: #091319;
+    }
+}

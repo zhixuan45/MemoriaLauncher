@@ -1,152 +1,652 @@
-import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import {
+    InstanceEntry,
+    ChangelogEntry,
+    TaskEntry,
+    PlayerProfile,
+    DownloadVersionEntry,
+    AiPromptEntry,
+    AiShowcaseEntry,
+    AiTaskEntry
+} from "common.slint";
+import {
+    DraggableWidget,
+    LeftSidebar,
+    LaunchPanelCard,
+    InstanceStatsCard
+} from "widgets.slint";
+import {
+    InstanceListCard,
+    ChangelogCard,
+    TaskQueueCard
+} from "cards.slint";
+import { DownloadView } from "download.slint";
+import { AiView } from "ai.slint";
+import { SettingsView } from "settings.slint";
 
-export struct InstanceItem {
-    id: string,
-    name: string,
-    mc_version: string,
-    loader: string,
+export {
+    InstanceEntry,
+    ChangelogEntry,
+    TaskEntry,
+    PlayerProfile,
+    DownloadVersionEntry,
+    AiPromptEntry,
+    AiShowcaseEntry,
+    AiTaskEntry
 }
 
 export component MainWindow inherits Window {
-    title: "MC AI Launcher";
-    min-width: 800px;
-    min-height: 520px;
-    background: #18181b;
+    title: "MC 启动器 - 探索 · 创造 · 更多可能";
+    no-frame: true;
+    preferred-width: 1146px;
+    preferred-height: 640px;
+    min-width: 1024px;
+    min-height: 614px;
+    background: #0a1117;
 
-    in property <[InstanceItem]> instances: [];
-    in property <string> status_text: "就绪";
+    // 当前主导航页签 (0: 主页, 1: 游戏下载, 2: AI功能, 3: 设置)
+    in-out property <int> current_tab: 0;
+
+    // 后端注入的业务数据模型（实例列表、更新日志、任务队列、玩家档案、下载版本列表、AI 视图模型）
+    in-out property <[InstanceEntry]> instances: [];
+    in-out property <[ChangelogEntry]> changelogs: [];
+    in-out property <[TaskEntry]> tasks: [];
+    in-out property <[PlayerProfile]> profiles: [];
+    in-out property <[DownloadVersionEntry]> download_versions: [];
+    in-out property <[AiPromptEntry]> ai_prompts: [];
+    in-out property <[AiShowcaseEntry]> ai_showcases: [];
+    in-out property <[AiTaskEntry]> ai_tasks: [];
+
+    in-out property <DownloadVersionEntry> selected_download_version: {
+        id: "1.21",
+        title: "Minecraft 1.21",
+        release_badge: "正式版",
+        type_badge: "原版",
+        release_date: "2024-06-13",
+        java_tag: "Java 21",
+        supported_loaders: "原版 / Fabric / Forge",
+        summary: "Minecraft 1.21（正式版）带来了全新的冒险内容、建筑方块、生物与机制，在探索与创造方面提供了更多可能性。",
+        feature_1: "新增试炼密室（Trial Chambers）",
+        feature_2: "新增铜傀儡（Copper Golem）",
+        feature_3: "新的工艺与装饰方块",
+        feature_4: "优化了部分游戏机制与性能",
+        feature_5: "更多生物与环境改进",
+    };
+
+    in-out property <PlayerProfile> current_profile: {
+        id: "prof-steve",
+        username: "Steve_AI",
+        uuid: "8667ba71b85a4004af54457a9734eed7",
+        account_type: "Microsoft 正版",
+        has_avatar: false,
+        skin_tint: #3b2314,
+        online: true,
+    };
+
+    in-out property <InstanceEntry> current_instance: {
+        id: "inst-fabric-121",
+        name: "Fabric 1.21",
+        version_tag: "1.21",
+        loader_tag: "Fabric",
+        java_tag: "Java 21",
+        subtitle: "Fabric · 1.21 · Java 21",
+        status: "installed",
+        status_text: "已安装",
+        icon_type: "grass",
+        game_dir: "D:\\MC\\Instances\nFabric-1.21",
+        play_time: "128 小时",
+        mod_count: "42 个",
+    };
+
+    // 预留给后续「设置」页面的自定义壁纸与自定义遮罩属性
+    in-out property <image> custom_bg_image: @image-url("assets/bg_wallpaper.png");
+    in-out property <color> bg_mask_color: #0a1117;
+    in-out property <float> bg_mask_opacity: 0.0;
+
+    in-out property <string> status_text: "就绪";
+
+    // 布局编辑开关与可删除模块显隐状态
+    in-out property <bool> edit_mode: false;
+    in-out property <bool> show_stats: true;
+    in-out property <bool> show_changelog: true;
+    in-out property <bool> show_tasks: true;
+
+    // 主页模块 16px 网格对齐初始坐标与活动宽高
+    in-out property <length> launch_x: 16px;
+    in-out property <length> launch_y: 128px;
+    in-out property <length> stats_x: 16px;
+    in-out property <length> stats_y: 304px;
+
+    in-out property <length> list_x: 384px;
+    in-out property <length> list_y: 96px;
+    in-out property <length> list_w: 288px;
+    in-out property <length> list_h: 272px;
+
+    in-out property <length> changelog_x: 688px;
+    in-out property <length> changelog_y: 48px;
+    in-out property <length> changelog_w: 256px;
+    in-out property <length> changelog_h: 320px;
+
+    in-out property <length> tasks_x: 688px;
+    in-out property <length> tasks_y: 384px;
+    in-out property <length> tasks_w: 256px;
+    in-out property <length> tasks_h: 208px;
+
+    // 业务与无边框窗口控制回调
+    callback start_game_clicked(string);
+    callback edit_instance_clicked(string);
+    callback select_instance_clicked(string);
+    callback move_instance_clicked(int, int);
     callback refresh_clicked();
-    callback create_instance_clicked();
+    callback view_all_changelogs_clicked();
+    callback toggle_task_clicked(string);
+    callback pause_all_tasks_clicked();
+    callback select_profile_clicked(string);
+    callback cycle_profile_clicked();
+    callback add_profile_clicked();
+    callback select_download_version_clicked(string);
+    callback install_version_clicked(string);
+    callback submit_ai_prompt_clicked(string, string, string);
+    callback cycle_ai_prompts_clicked();
+    callback select_ai_showcase_clicked(string);
+    callback toggle_ai_task_clicked(string);
+    callback remove_ai_task_clicked(string);
+    callback filter_download_versions_clicked(string, int, int, int, int);
 
-    HorizontalBox {
-        padding: 0px;
-        spacing: 0px;
+    // 无边框内化标题栏窗口控制回调
+    callback drag_window(length, length);
+    callback minimize_window_clicked();
+    callback maximize_window_clicked();
+    callback close_window_clicked();
 
-        // 左侧侧边栏
-        Rectangle {
-            width: 200px;
-            background: #27272a;
+    // 重置所有模块位置与活动尺寸到 16px 基准网格并恢复已删组件
+    public function reset_layout() {
+        root.show_stats = true;
+        root.show_changelog = true;
+        root.show_tasks = true;
+        root.launch_x = 16px;
+        root.launch_y = 128px;
+        root.stats_x = 16px;
+        root.stats_y = 304px;
+        root.list_x = 384px;
+        root.list_y = 96px;
+        root.list_w = 288px;
+        root.list_h = 272px;
+        root.changelog_x = 688px;
+        root.changelog_y = 48px;
+        root.changelog_w = 256px;
+        root.changelog_h = 320px;
+        root.tasks_x = 688px;
+        root.tasks_y = 384px;
+        root.tasks_w = 256px;
+        root.tasks_h = 208px;
+        root.status_text = "已按 16px 网格恢复默认主页布局与尺寸";
+    }
 
-            VerticalBox {
-                padding: 16px;
-                spacing: 12px;
+    // 无边框窗口外轮廓描边
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-width: 1px;
+        border-color: #1e2d38;
 
-                Text {
-                    text: "MC AI Launcher";
-                    color: #fafafa;
-                    font-size: 18px;
-                    font-weight: 700;
+        HorizontalLayout {
+            // 左侧固定导航栏（底部含玩家账号/档案选择，与设置页实时同步）
+            LeftSidebar {
+                current_tab <=> root.current_tab;
+                profiles: root.profiles;
+                current_profile: root.current_profile;
+                select_profile(id) => {
+                    root.select_profile_clicked(id);
                 }
-
-                Text {
-                    text: "阶段 0 原生骨架";
-                    color: #a1a1aa;
-                    font-size: 12px;
+                add_profile_clicked => {
+                    root.add_profile_clicked();
                 }
-
-                Rectangle { height: 16px; }
-
-                Button {
-                    text: "游戏实例";
-                    primary: true;
-                }
-
-                Button {
-                    text: "下载游戏";
-                }
-
-                Button {
-                    text: "Mod 中心";
-                }
-
-                Button {
-                    text: "任务与日志";
-                }
-
-                Rectangle { } // 弹性占位空间
-
-                Text {
-                    text: root.status_text;
-                    color: #a1a1aa;
-                    font-size: 12px;
+                drag_window(dx, dy) => {
+                    root.drag_window(dx, dy);
                 }
             }
-        }
 
-        // 右侧内容区
-        Rectangle {
-            background: #18181b;
+            // 右侧主内容画布区
+            canvas := Rectangle {
+                horizontal-stretch: 1;
+                background: #0a1117;
+                clip: true;
 
-            VerticalBox {
-                padding: 24px;
-                spacing: 16px;
-
-                HorizontalBox {
-                    padding: 0px;
-                    Text {
-                        text: "实例管理";
-                        color: #fafafa;
-                        font-size: 20px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-
-                    Rectangle { }
-
-                    Button {
-                        text: "刷新列表";
-                        clicked => { root.refresh_clicked(); }
-                    }
-
-                    Button {
-                        text: "+ 创建新实例";
-                        primary: true;
-                        clicked => { root.create_instance_clicked(); }
-                    }
+                // 背景壁纸层
+                Image {
+                    x: 0px;
+                    y: 0px;
+                    width: 100%;
+                    height: 100%;
+                    source: root.custom_bg_image;
+                    image-fit: cover;
                 }
 
+                // 自定义背景遮罩层
                 Rectangle {
-                    height: 1px;
-                    background: #3f3f46;
+                    x: 0px;
+                    y: 0px;
+                    width: 100%;
+                    height: 100%;
+                    background: root.bg_mask_color;
+                    opacity: root.bg_mask_opacity;
                 }
 
-                for item in root.instances: Rectangle {
-                    height: 72px;
-                    background: #27272a;
-                    border-radius: 8px;
-                    border-width: 1px;
-                    border-color: #3f3f46;
+                // 内化无边框窗口标题栏（支持拖拽移动窗口、布局编辑与最小化/最大化/关闭）
+                Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: 100%;
+                    height: 40px;
+                    z: 50;
 
-                    HorizontalBox {
-                        padding: 16px;
-                        spacing: 16px;
-
-                        VerticalBox {
-                            padding: 0px;
-                            spacing: 4px;
-                            Text {
-                                text: item.name;
-                                color: #f4f4f5;
-                                font-size: 15px;
-                                font-weight: 600;
+                    TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        moved => {
+                            if (self.pressed) {
+                                root.drag_window(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
                             }
-                            Text {
-                                text: "Minecraft " + item.mc_version + " · " + item.loader;
-                                color: #a1a1aa;
-                                font-size: 12px;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        alignment: end;
+
+                        // 状态提示标签
+                        Text {
+                            text: (root.current_tab == 0 && root.edit_mode) ? "布局编辑模式（16px 网格对齐）：按住可拖动，右下角手柄可缩放列表宽高" : root.status_text;
+                            color: (root.current_tab == 0 && root.edit_mode) ? #00e58b : #94a3b8;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        // 恢复默认控件按钮（仅在主页展示）
+                        if root.current_tab == 0 && (root.edit_mode || !root.show_stats || !root.show_changelog || !root.show_tasks): Rectangle {
+                            width: 106px;
+                            height: 26px;
+                            y: 7px;
+                            border-radius: 6px;
+                            background: reset_touch.has-hover ? #1e293b : #0f172acc;
+                            border-width: 1px;
+                            border-color: #38bdf866;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 5px;
+
+                                Path {
+                                    width: 11px;
+                                    height: 11px;
+                                    y: (parent.height - self.height) / 2;
+                                    commands: "M 2 4 A 4.5 4.5 0 1 1 2.5 8.5 M 1 1.5 L 2 4.5 L 5 3.8";
+                                    stroke: #7dd3fc;
+                                    stroke-width: 1.4px;
+                                }
+
+                                Text {
+                                    text: "恢复默认控件";
+                                    color: #7dd3fc;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            reset_touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.reset_layout(); }
                             }
                         }
 
-                        Rectangle { }
+                        // 编辑布局开关按钮（仅在主页展示）
+                        if root.current_tab == 0: Rectangle {
+                            width: 90px;
+                            height: 26px;
+                            y: 7px;
+                            border-radius: 6px;
+                            background: root.edit_mode ? #00e58b : (edit_mode_touch.has-hover ? #1e293bdd : #0f172acc);
+                            border-width: 1px;
+                            border-color: root.edit_mode ? #00e58b : #334155;
 
-                        Button {
-                            text: "启动游戏";
-                            primary: true;
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 6px;
+
+                                if !root.edit_mode: Path {
+                                    width: 11px;
+                                    height: 11px;
+                                    y: (parent.height - self.height) / 2;
+                                    commands: "M 1 1 L 4.5 1 L 4.5 4.5 L 1 4.5 Z M 6.5 1 L 10 1 L 10 4.5 L 6.5 4.5 Z M 1 6.5 L 4.5 6.5 L 4.5 10 L 1 10 Z M 6.5 6.5 L 10 6.5 L 10 10 L 6.5 10 Z";
+                                    stroke: #e2e8f0;
+                                    stroke-width: 1.2px;
+                                }
+
+                                if root.edit_mode: Path {
+                                    width: 11px;
+                                    height: 9px;
+                                    y: (parent.height - self.height) / 2;
+                                    commands: "M 1 4.5 L 4 7.5 L 10 1.5";
+                                    stroke: #041d12;
+                                    stroke-width: 1.8px;
+                                }
+
+                                Text {
+                                    text: root.edit_mode ? "完成布局" : "编辑布局";
+                                    color: root.edit_mode ? #041d12 : #e2e8f0;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            edit_mode_touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.edit_mode = !root.edit_mode;
+                                }
+                            }
+                        }
+
+                        // 通知铃铛与未读红点
+                        Rectangle {
+                            width: 28px;
+                            height: 26px;
+                            y: 7px;
+                            Path {
+                                width: 15px;
+                                height: 15px;
+                                x: 6px;
+                                y: 5px;
+                                commands: "M 7.5 1 C 5 1 3 3 3 6 L 3 10 L 1.5 11.5 L 1.5 12.5 L 13.5 12.5 L 13.5 11.5 L 12 10 L 12 6 C 12 3 10 1 7.5 1 Z";
+                                fill: #cbd5e1;
+                            }
+                            Rectangle {
+                                x: 16px;
+                                y: 4px;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                background: #ef4444;
+                            }
+                        }
+
+                        // 内化无边框窗口控制按钮组（最小化、最大化/还原、关闭）
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: center;
+
+                            Rectangle {
+                                width: 28px;
+                                height: 26px;
+                                y: 7px;
+                                border-radius: 5px;
+                                background: min_touch.has-hover ? #ffffff18 : transparent;
+                                Rectangle {
+                                    x: 9px;
+                                    y: 12px;
+                                    width: 10px;
+                                    height: 1.5px;
+                                    background: #cbd5e1;
+                                }
+                                min_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.minimize_window_clicked(); }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 28px;
+                                height: 26px;
+                                y: 7px;
+                                border-radius: 5px;
+                                background: max_touch.has-hover ? #ffffff18 : transparent;
+                                Rectangle {
+                                    x: 9px;
+                                    y: 8px;
+                                    width: 10px;
+                                    height: 10px;
+                                    border-radius: 1.5px;
+                                    border-width: 1.4px;
+                                    border-color: #cbd5e1;
+                                }
+                                max_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.maximize_window_clicked(); }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 28px;
+                                height: 26px;
+                                y: 7px;
+                                border-radius: 5px;
+                                background: close_touch.has-hover ? #ef4444dd : transparent;
+                                Path {
+                                    x: 9px;
+                                    y: 8px;
+                                    width: 10px;
+                                    height: 10px;
+                                    commands: "M 1 1 L 9 9 M 9 1 L 1 9";
+                                    stroke: close_touch.has-hover ? #ffffff : #cbd5e1;
+                                    stroke-width: 1.5px;
+                                }
+                                close_touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.close_window_clicked(); }
+                                }
+                            }
                         }
                     }
                 }
 
-                Rectangle { }
+                // ==================== 页签 0：主页自由画布 ====================
+                if root.current_tab == 0: Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    // 1. 当前游戏实例与启动按钮/编辑实例区（可自由拖动，不可删除）
+                    DraggableWidget {
+                        pos_x <=> root.launch_x;
+                        pos_y <=> root.launch_y;
+                        widget_w: 352px;
+                        widget_h: 160px;
+                        max_x: canvas.width;
+                        max_y: canvas.height;
+                        edit_mode: root.edit_mode;
+                        deletable: false;
+                        resizable: false;
+                        widget_title: "启动与编辑实例";
+
+                        LaunchPanelCard {
+                            current_instance: root.current_instance;
+                            start_game_clicked => {
+                                root.start_game_clicked(root.current_instance.id);
+                            }
+                            edit_instance_clicked => {
+                                root.edit_instance_clicked(root.current_instance.id);
+                            }
+                        }
+                    }
+
+                    // 2. 实例统计信息栏（可自由拖动，可删除）
+                    if root.show_stats: DraggableWidget {
+                        pos_x <=> root.stats_x;
+                        pos_y <=> root.stats_y;
+                        widget_w: 352px;
+                        widget_h: 64px;
+                        max_x: canvas.width;
+                        max_y: canvas.height;
+                        edit_mode: root.edit_mode;
+                        deletable: true;
+                        resizable: false;
+                        widget_title: "实例统计";
+                        delete_clicked => {
+                            root.show_stats = false;
+                            root.status_text = "已移除「实例统计」组件，可点击右上角恢复";
+                        }
+
+                        InstanceStatsCard {
+                            play_time: root.current_instance.play_time;
+                            mod_count: root.current_instance.mod_count;
+                            game_dir: root.current_instance.game_dir;
+                        }
+                    }
+
+                    // 3. 实例列表活动卡片（可自由拖动与缩放宽高，不可删除）
+                    DraggableWidget {
+                        pos_x <=> root.list_x;
+                        pos_y <=> root.list_y;
+                        widget_w <=> root.list_w;
+                        widget_h <=> root.list_h;
+                        min_w: 240px;
+                        min_h: 160px;
+                        max_x: canvas.width;
+                        max_y: canvas.height;
+                        edit_mode: root.edit_mode;
+                        deletable: false;
+                        resizable: true;
+                        widget_title: "实例列表";
+
+                        InstanceListCard {
+                            instances: root.instances;
+                            active_id: root.current_instance.id;
+                            select_instance(id) => {
+                                root.select_instance_clicked(id);
+                            }
+                            move_instance(from_idx, to_idx) => {
+                                root.move_instance_clicked(from_idx, to_idx);
+                            }
+                            manage_clicked => {
+                                root.refresh_clicked();
+                            }
+                        }
+                    }
+
+                    // 4. 更新日志活动卡片（可自由拖动与缩放宽高，可删除）
+                    if root.show_changelog: DraggableWidget {
+                        pos_x <=> root.changelog_x;
+                        pos_y <=> root.changelog_y;
+                        widget_w <=> root.changelog_w;
+                        widget_h <=> root.changelog_h;
+                        min_w: 224px;
+                        min_h: 176px;
+                        max_x: canvas.width;
+                        max_y: canvas.height;
+                        edit_mode: root.edit_mode;
+                        deletable: true;
+                        resizable: true;
+                        widget_title: "更新日志";
+                        delete_clicked => {
+                            root.show_changelog = false;
+                            root.status_text = "已移除「更新日志」组件，可点击右上角恢复";
+                        }
+
+                        ChangelogCard {
+                            changelogs: root.changelogs;
+                            view_all_clicked => {
+                                root.view_all_changelogs_clicked();
+                            }
+                        }
+                    }
+
+                    // 5. 任务队列活动卡片（可自由拖动与缩放宽高，可删除）
+                    if root.show_tasks: DraggableWidget {
+                        pos_x <=> root.tasks_x;
+                        pos_y <=> root.tasks_y;
+                        widget_w <=> root.tasks_w;
+                        widget_h <=> root.tasks_h;
+                        min_w: 224px;
+                        min_h: 144px;
+                        max_x: canvas.width;
+                        max_y: canvas.height;
+                        edit_mode: root.edit_mode;
+                        deletable: true;
+                        resizable: true;
+                        widget_title: "任务队列";
+                        delete_clicked => {
+                            root.show_tasks = false;
+                            root.status_text = "已移除「任务队列」组件，可点击右上角恢复";
+                        }
+
+                        TaskQueueCard {
+                            tasks: root.tasks;
+                            toggle_task_clicked(id) => {
+                                root.toggle_task_clicked(id);
+                            }
+                            pause_all_clicked => {
+                                root.pause_all_tasks_clicked();
+                            }
+                        }
+                    }
+                }
+
+                // ==================== 页签 1：游戏下载视图 ====================
+                if root.current_tab == 1: DownloadView {
+                    download_versions: root.download_versions;
+                    selected_version: root.selected_download_version;
+                    status_text <=> root.status_text;
+                    select_version(ver_id) => {
+                        root.select_download_version_clicked(ver_id);
+                    }
+                    install_version(ver_id) => {
+                        root.install_version_clicked(ver_id);
+                    }
+                    filter_versions(query, scope_idx, type_idx, loader_idx, sort_idx) => {
+                        root.filter_download_versions_clicked(query, scope_idx, type_idx, loader_idx, sort_idx);
+                    }
+                    action_triggered(msg) => {
+                        root.status_text = msg;
+                    }
+                }
+
+                // ==================== 页签 2：AI 功能视图 ====================
+                if root.current_tab == 2: AiView {
+                    quick_prompts: root.ai_prompts;
+                    showcases: root.ai_showcases;
+                    ai_tasks: root.ai_tasks;
+                    status_text <=> root.status_text;
+                    submit_prompt(prompt, ver, lang) => {
+                        root.submit_ai_prompt_clicked(prompt, ver, lang);
+                    }
+                    cycle_prompts_clicked => {
+                        root.cycle_ai_prompts_clicked();
+                    }
+                    select_showcase(showcase_id) => {
+                        root.select_ai_showcase_clicked(showcase_id);
+                    }
+                    toggle_ai_task(task_id) => {
+                        root.toggle_ai_task_clicked(task_id);
+                    }
+                    remove_ai_task(task_id) => {
+                        root.remove_ai_task_clicked(task_id);
+                    }
+                    action_triggered(msg) => {
+                        root.status_text = msg;
+                    }
+                }
+
+                // ==================== 页签 3：设置菜单视图 ====================
+                if root.current_tab == 3: SettingsView {
+                    profiles: root.profiles;
+                    current_profile: root.current_profile;
+                    bg_mask_opacity <=> root.bg_mask_opacity;
+                    status_text <=> root.status_text;
+                    select_profile(id) => {
+                        root.select_profile_clicked(id);
+                    }
+                    cycle_profile_clicked => {
+                        root.cycle_profile_clicked();
+                    }
+                    action_triggered(msg) => {
+                        root.status_text = msg;
+                    }
+                }
             }
         }
     }

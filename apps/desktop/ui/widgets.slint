@@ -1,0 +1,723 @@
+import {
+    InstanceEntry,
+    ChangelogEntry,
+    TaskEntry,
+    PlayerProfile,
+    GlassCard,
+    VectorIcon,
+    SlimScrollbar,
+    TagPill,
+    PlayerAvatar
+} from "common.slint";
+
+export { InstanceEntry, ChangelogEntry, TaskEntry, PlayerProfile, PlayerAvatar }
+
+// 通用可自由拖拽、支持 16px 隐形网格自动对齐缩放与受保护删除容器
+export component DraggableWidget inherits Rectangle {
+    in-out property <length> pos_x: 0px;
+    in-out property <length> pos_y: 0px;
+    in-out property <length> widget_w: 288px;
+    in-out property <length> widget_h: 272px;
+    in property <length> min_w: 208px;
+    in property <length> min_h: 144px;
+    in property <length> grid_size: 16px;
+    in property <length> min_x: 16px;
+    in property <length> min_y: 48px;
+    in property <length> max_x: 1000px;
+    in property <length> max_y: 680px;
+    in property <bool> edit_mode: false;
+    in property <bool> deletable: true;
+    in property <bool> resizable: false;
+    in property <string> widget_title: "";
+    callback delete_clicked();
+
+    x: root.pos_x;
+    y: root.pos_y;
+    width: root.widget_w;
+    height: root.widget_h;
+
+    @children
+
+    if root.edit_mode: Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 12px;
+        border-width: 1.5px;
+        border-color: (drag_area.pressed || resize_area.pressed) ? #00e58b : (drag_area.has-hover ? #00e58bcc : #00e58b77);
+        background: (drag_area.pressed || resize_area.pressed) ? #00e58b1f : (drag_area.has-hover ? #00e58b0f : #00000028);
+
+        drag_area := TouchArea {
+            width: 100%;
+            height: 100%;
+            mouse-cursor: self.pressed ? grabbing : grab;
+            moved => {
+                if (self.pressed) {
+                    if (abs(self.mouse-x - self.pressed-x) >= 9px) {
+                        root.pos_x = max(
+                            root.min_x,
+                            min(
+                                floor((root.max_x - root.width) / root.grid_size) * root.grid_size,
+                                round((root.pos_x + (self.mouse-x - self.pressed-x)) / root.grid_size) * root.grid_size
+                            )
+                        );
+                    }
+                    if (abs(self.mouse-y - self.pressed-y) >= 9px) {
+                        root.pos_y = max(
+                            root.min_y,
+                            min(
+                                floor((root.max_y - root.height) / root.grid_size) * root.grid_size,
+                                round((root.pos_y + (self.mouse-y - self.pressed-y)) / root.grid_size) * root.grid_size
+                            )
+                        );
+                    }
+                }
+            }
+            pointer-event(ev) => {
+                if (ev.kind == PointerEventKind.up) {
+                    root.pos_x = round(root.pos_x / root.grid_size) * root.grid_size;
+                    root.pos_y = round(root.pos_y / root.grid_size) * root.grid_size;
+                }
+            }
+        }
+
+        // 左上角模块拖拽提示胶囊
+        Rectangle {
+            x: 8px;
+            y: 8px;
+            height: 22px;
+            width: title_lbl.preferred-width + 28px;
+            border-radius: 6px;
+            background: #0a141ce6;
+            border-width: 1px;
+            border-color: #00e58b66;
+
+            HorizontalLayout {
+                padding-left: 7px;
+                padding-right: 7px;
+                spacing: 5px;
+                alignment: center;
+
+                Path {
+                    width: 10px;
+                    height: 10px;
+                    y: (parent.height - self.height) / 2;
+                    commands: "M 5 0 L 7 2 L 3 2 Z M 5 10 L 7 8 L 3 8 Z M 0 5 L 2 3 L 2 7 Z M 10 5 L 8 3 L 8 7 Z M 5 2 L 5 8 M 2 5 L 8 5";
+                    stroke: #00e58b;
+                    stroke-width: 1.2px;
+                    fill: #00e58b;
+                }
+
+                title_lbl := Text {
+                    text: root.widget_title;
+                    color: #00e58b;
+                    font-size: 11px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // 右上角：可删除按钮或受保护锁定标识
+        if root.deletable: Rectangle {
+            x: parent.width - 64px;
+            y: 8px;
+            width: 56px;
+            height: 22px;
+            border-radius: 6px;
+            background: del_touch.has-hover ? #ef4444 : #dc2626dd;
+
+            HorizontalLayout {
+                alignment: center;
+                spacing: 4px;
+
+                Path {
+                    width: 8px;
+                    height: 8px;
+                    y: (parent.height - self.height) / 2;
+                    commands: "M 1 1 L 7 7 M 7 1 L 1 7";
+                    stroke: #ffffff;
+                    stroke-width: 1.6px;
+                }
+
+                Text {
+                    text: "删除";
+                    color: #ffffff;
+                    font-size: 11px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+
+            del_touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.delete_clicked(); }
+            }
+        }
+
+        if !root.deletable: Rectangle {
+            x: parent.width - 82px;
+            y: 8px;
+            width: 74px;
+            height: 22px;
+            border-radius: 6px;
+            background: #0f1e28e6;
+            border-width: 1px;
+            border-color: #38bdf866;
+
+            HorizontalLayout {
+                alignment: center;
+                spacing: 4px;
+
+                Path {
+                    width: 9px;
+                    height: 10px;
+                    y: (parent.height - self.height) / 2;
+                    commands: "M 2 4 L 2 2.5 C 2 1 3 0 4.5 0 C 6 0 7 1 7 2.5 L 7 4 M 1 4 L 8 4 L 8 9.5 L 1 9.5 Z";
+                    stroke: #7dd3fc;
+                    stroke-width: 1.2px;
+                }
+
+                Text {
+                    text: "不可删除";
+                    color: #7dd3fc;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // 右下角：活动布局自由缩放手柄
+        resize_area := TouchArea {
+            enabled: root.resizable;
+            x: parent.width - 24px;
+            y: parent.height - 24px;
+            width: 24px;
+            height: 24px;
+            mouse-cursor: nwse-resize;
+
+            if root.resizable: Rectangle {
+                width: 100%;
+                height: 100%;
+                border-radius: 6px;
+                background: parent.pressed ? #00e58b44 : (parent.has-hover ? #00e58b28 : #0a141ccc);
+                border-width: 1px;
+                border-color: #00e58b88;
+
+                Path {
+                    x: 5px;
+                    y: 5px;
+                    width: 14px;
+                    height: 14px;
+                    commands: "M 13 3 L 3 13 M 13 8 L 8 13 M 13 12 L 12 13";
+                    stroke: #00e58b;
+                    stroke-width: 1.6px;
+                }
+            }
+
+            moved => {
+                if (self.pressed && root.resizable) {
+                    if (abs(self.mouse-x - self.pressed-x) >= 9px) {
+                        root.widget_w = max(
+                            root.min_w,
+                            min(
+                                floor((root.max_x - root.pos_x) / root.grid_size) * root.grid_size,
+                                round((root.widget_w + (self.mouse-x - self.pressed-x)) / root.grid_size) * root.grid_size
+                            )
+                        );
+                    }
+                    if (abs(self.mouse-y - self.pressed-y) >= 9px) {
+                        root.widget_h = max(
+                            root.min_h,
+                            min(
+                                floor((root.max_y - root.pos_y) / root.grid_size) * root.grid_size,
+                                round((root.widget_h + (self.mouse-y - self.pressed-y)) / root.grid_size) * root.grid_size
+                            )
+                        );
+                    }
+                }
+            }
+            pointer-event(ev) => {
+                if (ev.kind == PointerEventKind.up && root.resizable) {
+                    root.widget_w = round(root.widget_w / root.grid_size) * root.grid_size;
+                    root.widget_h = round(root.widget_h / root.grid_size) * root.grid_size;
+                }
+            }
+        }
+    }
+}
+
+// 侧边导航单项组件（复用 VectorIcon，AI 页签激活时使用专属紫色流光高亮）
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon_kind;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 44px;
+    border-radius: 10px;
+    background: root.active ? (root.icon_kind == "ai" ? @linear-gradient(90deg, #7c3aed55 0%, #9333ea22 100%) : @linear-gradient(90deg, #00d47e38 0%, #00d47e12 100%)) : (touch.has-hover ? #ffffff0a : transparent);
+    border-width: root.active ? 1px : 0px;
+    border-color: root.icon_kind == "ai" ? #a855f788 : #00e58b44;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        spacing: 12px;
+        alignment: start;
+
+        VectorIcon {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            kind: root.icon_kind;
+            icon_color: root.active ? (root.icon_kind == "ai" ? #c4b5fd : #00e58b) : (root.icon_kind == "ai" ? #a78bfa : #94a3b8);
+        }
+
+        Text {
+            text: root.label;
+            color: root.active ? #ffffff : #cbd5e1;
+            font-size: 14px;
+            font-weight: root.active ? 600 : 500;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 左侧固定导航栏（底部内置玩家账号/档案选择器）
+export component LeftSidebar inherits Rectangle {
+    in-out property <int> current_tab: 0;
+    in property <[PlayerProfile]> profiles: [];
+    in property <PlayerProfile> current_profile;
+    private property <bool> show_profile_popup: false;
+
+    callback select_profile(string);
+    callback add_profile_clicked();
+    callback drag_window(length, length);
+
+    width: 186px;
+    background: #091319;
+
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        height: 100%;
+        background: #1e2d38;
+    }
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        // 顶部品牌区（支持按住拖拽无边框窗口）
+        Rectangle {
+            height: 54px;
+
+            HorizontalLayout {
+                padding-top: 4px;
+                padding-bottom: 10px;
+                spacing: 10px;
+                alignment: start;
+
+                Image {
+                    width: 40px;
+                    height: 40px;
+                    source: @image-url("assets/icon_grass.png");
+                    image-fit: contain;
+                }
+
+                VerticalLayout {
+                    spacing: 3px;
+                    alignment: center;
+                    Text { text: "MC 启动器"; color: #ffffff; font-size: 16px; font-weight: 700; }
+                    Text { text: "探索 · 创造 · 更多可能"; color: #64748b; font-size: 10px; }
+                }
+            }
+
+            TouchArea {
+                moved => {
+                    if (self.pressed) {
+                        root.drag_window(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                    }
+                }
+            }
+        }
+
+        NavItem { label: "主页"; icon_kind: "home"; active: root.current_tab == 0; clicked => { root.current_tab = 0; } }
+        NavItem { label: "游戏下载"; icon_kind: "download"; active: root.current_tab == 1; clicked => { root.current_tab = 1; } }
+        NavItem { label: "AI功能"; icon_kind: "ai"; active: root.current_tab == 2; clicked => { root.current_tab = 2; } }
+        NavItem { label: "设置"; icon_kind: "settings"; active: root.current_tab == 3; clicked => { root.current_tab = 3; } }
+
+        Rectangle { vertical-stretch: 1; }
+
+        // 底部固定玩家账号卡片
+        Rectangle {
+            height: 56px;
+            border-radius: 10px;
+            background: prof_btn_touch.has-hover ? #142532 : #0e1c26;
+            border-width: 1px;
+            border-color: root.show_profile_popup ? #00e58b88 : #1f3241;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 10px;
+
+                PlayerAvatar {
+                    y: (parent.height - self.height) / 2;
+                    avatar: root.current_profile.avatar;
+                    has_avatar: root.current_profile.has_avatar;
+                    hair_color: root.current_profile.skin_tint;
+                    online: root.current_profile.online;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+
+                    Text { text: root.current_profile.username; color: #f8fafc; font-size: 13px; font-weight: 700; overflow: elide; }
+                    Text { text: root.current_profile.account_type; color: root.current_profile.online ? #00e58b : #94a3b8; font-size: 10px; overflow: elide; }
+                }
+
+                Path {
+                    width: 8px;
+                    height: 12px;
+                    y: (parent.height - self.height) / 2;
+                    commands: "M 1 4 L 4 1 L 7 4 M 1 8 L 4 11 L 7 8";
+                    stroke: #94a3b8;
+                    stroke-width: 1.4px;
+                }
+            }
+
+            prof_btn_touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.show_profile_popup = !root.show_profile_popup; }
+            }
+        }
+    }
+
+    // 向上展开的账号切换浮动面板（上限 5 项，超出支持滚轮与拖拽下滑）
+    if root.show_profile_popup: popup_box := Rectangle {
+        property <length> item_step: 44px;
+        property <int> visible_count: min(5, root.profiles.length);
+        property <length> list_view_h: self.visible_count * self.item_step;
+        property <length> total_content_h: root.profiles.length * self.item_step;
+        property <length> max_scroll: max(0px, self.total_content_h - self.list_view_h);
+        property <length> safe_max_scroll: max(1px, self.max_scroll);
+
+        x: 14px;
+        y: parent.height - 76px - self.height;
+        width: parent.width - 28px;
+        height: self.list_view_h + 48px;
+        z: 40;
+        border-radius: 10px;
+        background: #0d1b24fa;
+        border-width: 1px;
+        border-color: #263b4b;
+
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            scroll-event(ev) => {
+                if (popup_box.max_scroll > 0px) {
+                    prof_flick.viewport-y = max(-popup_box.max_scroll, min(0px, prof_flick.viewport-y + ev.delta-y * 0.6));
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        VerticalLayout {
+            padding: 6px;
+            spacing: 4px;
+
+            Rectangle {
+                height: popup_box.list_view_h;
+                width: 100%;
+                clip: true;
+
+                prof_flick := Flickable {
+                    width: parent.width - (root.profiles.length > 5 ? 6px : 0px);
+                    height: 100%;
+                    viewport-width: self.width;
+                    viewport-height: popup_box.total_content_h;
+
+                    for prof[idx] in root.profiles: Rectangle {
+                        x: 0px;
+                        y: idx * 44px;
+                        width: parent.width;
+                        height: 40px;
+                        border-radius: 7px;
+                        background: prof.id == root.current_profile.id ? #003b29aa : (item_touch.has-hover ? #182b38 : transparent);
+                        border-width: prof.id == root.current_profile.id ? 1px : 0px;
+                        border-color: #00e58b66;
+
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+
+                            PlayerAvatar {
+                                y: 3px;
+                                avatar: prof.avatar;
+                                has_avatar: prof.has_avatar;
+                                hair_color: prof.skin_tint;
+                                online: prof.online;
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 1px;
+                                horizontal-stretch: 1;
+                                Text { text: prof.username; color: #f8fafc; font-size: 12px; font-weight: 600; overflow: elide; }
+                                Text { text: prof.account_type; color: prof.online ? #00e58b : #94a3b8; font-size: 10px; overflow: elide; }
+                            }
+
+                            if prof.id == root.current_profile.id: Path {
+                                width: 10px;
+                                height: 8px;
+                                y: (parent.height - self.height) / 2;
+                                commands: "M 1 4 L 4 7 L 9 1";
+                                stroke: #00e58b;
+                                stroke-width: 1.6px;
+                            }
+                        }
+
+                        item_touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.select_profile(prof.id);
+                                root.show_profile_popup = false;
+                            }
+                            scroll-event(ev) => {
+                                if (popup_box.max_scroll > 0px) {
+                                    prof_flick.viewport-y = max(-popup_box.max_scroll, min(0px, prof_flick.viewport-y + ev.delta-y * 0.6));
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+                    }
+                }
+
+                if root.profiles.length > 5: SlimScrollbar {
+                    x: parent.width - 3px;
+                    y: 2px;
+                    height: parent.height - 4px;
+                    visible_ratio: 5.0 / root.profiles.length;
+                    scroll_progress: (-prof_flick.viewport-y) / popup_box.safe_max_scroll;
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: add_touch.has-hover ? #172a38 : #11202b;
+
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+
+                    Path {
+                        width: 10px;
+                        height: 10px;
+                        y: (parent.height - self.height) / 2;
+                        commands: "M 5 1 L 5 9 M 1 5 L 9 5";
+                        stroke: #38bdf8;
+                        stroke-width: 1.5px;
+                    }
+
+                    Text { text: "添加玩家档案"; color: #38bdf8; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                }
+
+                add_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.add_profile_clicked(); }
+                }
+            }
+        }
+    }
+}
+
+// 模块 1：当前游戏实例与启动/编辑按钮区（不可删除）
+export component LaunchPanelCard inherits Rectangle {
+    in property <InstanceEntry> current_instance;
+    callback start_game_clicked();
+    callback edit_instance_clicked();
+
+    width: 352px;
+    height: 160px;
+
+    VerticalLayout {
+        spacing: 14px;
+
+        HorizontalLayout {
+            spacing: 14px;
+            alignment: start;
+
+            Rectangle {
+                width: 80px;
+                height: 80px;
+                border-radius: 12px;
+                background: #0d1a22cc;
+                border-width: 1px;
+                border-color: #2a3e4d;
+
+                Image {
+                    x: 10px;
+                    y: 10px;
+                    width: 60px;
+                    height: 60px;
+                    source: root.current_instance.icon_type == "anvil" ? @image-url("assets/icon_anvil.png") :
+                            (root.current_instance.icon_type == "modpack" ? @image-url("assets/icon_modpack.png") : @image-url("assets/icon_grass.png"));
+                    image-fit: contain;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 5px;
+                alignment: center;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    VectorIcon { width: 12px; height: 12px; y: 2px; kind: "cube"; icon_color: #94a3b8; }
+                    Text { text: "当前游戏实例"; color: #94a3b8; font-size: 11px; }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text { text: root.current_instance.loader_tag; color: #ffffff; font-size: 26px; font-weight: 800; }
+                    Text { text: root.current_instance.version_tag; color: #60a5fa; font-size: 26px; font-weight: 700; }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    TagPill { text: root.current_instance.status_text; is_status: true; }
+                    TagPill { text: root.current_instance.loader_tag; }
+                    TagPill { text: root.current_instance.version_tag; }
+                    TagPill { text: root.current_instance.java_tag; }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            height: 46px;
+
+            Rectangle {
+                width: 196px;
+                height: 46px;
+                border-radius: 10px;
+                background: start_touch.pressed ? #00b86b : (start_touch.has-hover ? #10f59c : #00e58b);
+
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    VectorIcon { width: 12px; height: 12px; y: (parent.height - self.height) / 2; kind: "play"; icon_color: #041d12; }
+                    Text { text: "开始游戏"; color: #041d12; font-size: 15px; font-weight: 700; vertical-alignment: center; }
+                }
+
+                start_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.start_game_clicked(); }
+                }
+            }
+
+            Rectangle {
+                width: 144px;
+                height: 46px;
+                border-radius: 10px;
+                background: edit_touch.has-hover ? #1c2d3acc : #111f29cc;
+                border-width: 1px;
+                border-color: #2f4352;
+
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+
+                    Rectangle {
+                        width: 15px;
+                        height: 14px;
+                        y: (parent.height - self.height) / 2;
+                        Path { width: 15px; height: 14px; commands: "M 0 4 L 15 4 M 0 10 L 15 10"; stroke: #cbd5e1; stroke-width: 1.5px; }
+                        Rectangle { x: 3px; y: 1.5px; width: 5px; height: 5px; border-radius: 2.5px; background: #111f29; border-width: 1.5px; border-color: #cbd5e1; }
+                        Rectangle { x: 8px; y: 7.5px; width: 5px; height: 5px; border-radius: 2.5px; background: #111f29; border-width: 1.5px; border-color: #cbd5e1; }
+                    }
+
+                    Text { text: "编辑实例"; color: #e2e8f0; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+                }
+
+                edit_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.edit_instance_clicked(); }
+                }
+            }
+        }
+    }
+}
+
+// 模块 2：实例统计信息栏（复用 GlassCard 与 VectorIcon）
+export component InstanceStatsCard inherits GlassCard {
+    in property <string> play_time: "128 小时";
+    in property <string> mod_count: "42 个";
+    in property <string> game_dir: "D:\\MC\\Instances\nFabric-1.21";
+
+    width: 352px;
+    height: 64px;
+    border-radius: 10px;
+
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            width: 104px;
+            spacing: 8px;
+            alignment: center;
+            VectorIcon { width: 18px; height: 15px; y: (parent.height - self.height) / 2; kind: "gamepad"; icon_color: #94a3b8; }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text { text: "游戏时长"; color: #64748b; font-size: 10px; }
+                Text { text: root.play_time; color: #e2e8f0; font-size: 12px; font-weight: 600; }
+            }
+        }
+
+        Rectangle { width: 1px; height: 32px; y: 6px; background: #1e2e3b; }
+
+        HorizontalLayout {
+            width: 96px;
+            spacing: 8px;
+            alignment: center;
+            VectorIcon { width: 16px; height: 16px; y: (parent.height - self.height) / 2; kind: "cube"; icon_color: #94a3b8; }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text { text: "Mod 数量"; color: #64748b; font-size: 10px; }
+                Text { text: root.mod_count; color: #e2e8f0; font-size: 12px; font-weight: 600; }
+            }
+        }
+
+        Rectangle { width: 1px; height: 32px; y: 6px; background: #1e2e3b; }
+
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+            alignment: start;
+            VectorIcon { width: 16px; height: 14px; y: (parent.height - self.height) / 2; kind: "folder"; icon_color: #94a3b8; }
+            VerticalLayout {
+                alignment: center;
+                spacing: 1px;
+                Text { text: "游戏目录"; color: #64748b; font-size: 10px; }
+                Text { text: root.game_dir; color: #cbd5e1; font-size: 10px; overflow: elide; }
+            }
+        }
+    }
+}

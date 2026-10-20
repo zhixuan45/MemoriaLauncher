@@ -1,0 +1,1181 @@
+import {
+    DownloadVersionEntry,
+    GlassCard,
+    VectorIcon,
+    SlimScrollbar,
+    TagPill
+} from "common.slint";
+
+// 顶部五大资源分类卡片组件（游戏版本、Mod、整合包、资源包、光影包）
+component DownloadCategoryCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> icon_kind: "cube";
+    in property <color> icon_color: #38bdf8;
+    in property <bool> use_grass_image: false;
+    in property <bool> active: false;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    preferred-width: 0px;
+    min-width: 0px;
+    height: 52px;
+    border-radius: 10px;
+    background: root.active ? #0b2923e8 : (cat_touch.has-hover ? #13222ee8 : #0c1720dc);
+    border-width: root.active ? 1.5px : 1px;
+    border-color: root.active ? #00e58b : #1e3140;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 10px;
+
+        if root.use_grass_image: Image {
+            width: 30px;
+            height: 30px;
+            y: (parent.height - self.height) / 2;
+            source: @image-url("assets/icon_grass.png");
+            image-fit: contain;
+        }
+
+        if !root.use_grass_image: Rectangle {
+            width: 30px;
+            height: 30px;
+            y: (parent.height - self.height) / 2;
+
+            VectorIcon {
+                x: 4px;
+                y: 4px;
+                width: 22px;
+                height: 22px;
+                kind: root.icon_kind;
+                icon_color: root.icon_color;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            min-width: 0px;
+
+            Text {
+                text: root.title;
+                color: #f8fafc;
+                font-size: 13px;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.subtitle;
+                color: root.active ? #00e58b : #94a3b8;
+                font-size: 10px;
+                overflow: elide;
+            }
+        }
+    }
+
+    cat_touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 筛选栏下拉胶囊按钮组件
+component FilterDropdownChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> highlighted: false;
+    callback clicked();
+
+    width: chip_lbl.preferred-width + 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: root.highlighted
+        ? (chip_touch.has-hover ? #16f29a : #00e58b)
+        : (chip_touch.has-hover ? #172836 : #0e1a24dc);
+    border-width: 1px;
+    border-color: root.highlighted ? #00e58b : #213444;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 5px;
+        alignment: center;
+
+        chip_lbl := Text {
+            text: root.text;
+            color: root.highlighted ? #042215 : #cbd5e1;
+            font-size: 11px;
+            font-weight: root.highlighted ? 700 : 500;
+            vertical-alignment: center;
+        }
+
+        Path {
+            width: 8px;
+            height: 5px;
+            y: (parent.height - self.height) / 2;
+            commands: "M 1 1 L 4 4 L 7 1";
+            stroke: root.highlighted ? #042215 : #94a3b8;
+            stroke-width: 1.4px;
+        }
+    }
+
+    chip_touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 右侧详情面板元数据条目组件
+component VersionMetaItem inherits HorizontalLayout {
+    in property <string> icon_kind: "cube";
+    in property <string> label;
+    in property <string> value;
+
+    spacing: 7px;
+    height: 34px;
+
+    VectorIcon {
+        width: 13px;
+        height: 13px;
+        y: 3px;
+        kind: root.icon_kind;
+        icon_color: #94a3b8;
+    }
+
+    VerticalLayout {
+        spacing: 1px;
+        horizontal-stretch: 1;
+        min-width: 0px;
+
+        Text {
+            text: root.label;
+            color: #94a3b8;
+            font-size: 10px;
+        }
+
+        Text {
+            text: root.value;
+            color: #f1f5f9;
+            font-size: 11px;
+            font-weight: 700;
+            overflow: elide;
+        }
+    }
+}
+
+// 版本更新要点单行圆点列表项
+component FeatureBulletRow inherits HorizontalLayout {
+    in property <string> text;
+
+    spacing: 7px;
+    height: 17px;
+
+    Rectangle {
+        width: 4px;
+        height: 4px;
+        y: 6.5px;
+        border-radius: 2px;
+        background: #94a3b8;
+    }
+
+    Text {
+        horizontal-stretch: 1;
+        min-width: 0px;
+        preferred-width: 0px;
+        text: root.text;
+        color: #cbd5e1;
+        font-size: 11px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// 游戏下载主视图组件
+export component DownloadView inherits Rectangle {
+    in property <[DownloadVersionEntry]> download_versions: [];
+    in property <DownloadVersionEntry> selected_version;
+    in-out property <string> status_text: "就绪";
+
+    callback select_version(string);
+    callback install_version(string);
+    callback filter_versions(string, int, int, int, int);
+    callback action_triggered(string);
+
+    private property <int> active_category: 0;
+    private property <int> active_detail_tab: 0;
+    private property <int> filter_scope_idx: 0;  // 0: 全部版本, 1: 仅正式版, 2: 仅快照版
+    private property <int> filter_type_idx: 0;   // 0: 版本类型(全部), 1: 原版正式版, 2: 实验快照版
+    private property <int> filter_loader_idx: 0; // 0: 游戏加载器(全部), 1: 支持 Fabric, 2: 支持 Forge/NeoForge
+    private property <int> sort_idx: 0;          // 0: 按版本号排序, 1: 按发布时间排序
+    private property <int> banner_idx: 0;
+
+    width: 100%;
+    height: 100%;
+
+    VerticalLayout {
+        padding-top: 22px;
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-bottom: 14px;
+        spacing: 10px;
+
+        // 1. 顶部标题、副标题与搜索框区
+        VerticalLayout {
+            spacing: 5px;
+
+            HorizontalLayout {
+                height: 32px;
+                spacing: 8px;
+
+                VectorIcon {
+                    width: 24px;
+                    height: 24px;
+                    y: 4px;
+                    kind: "puzzle";
+                    icon_color: #00e58b;
+                }
+
+                Text {
+                    text: "游戏下载";
+                    color: #ffffff;
+                    font-size: 25px;
+                    font-weight: 800;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            Text {
+                text: "选择版本、Mod 或整合包，快速开始你的冒险";
+                color: #cbd5e1;
+                font-size: 12px;
+            }
+
+            // 搜索输入框
+            Rectangle {
+                width: 396px;
+                height: 32px;
+                border-radius: 7px;
+                background: #0c1721dc;
+                border-width: 1px;
+                border-color: dl_search.has-focus ? #00e58b88 : #223545;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 6px;
+                    spacing: 8px;
+
+                    // 纯矢量放大镜图标
+                    Rectangle {
+                        width: 14px;
+                        height: 14px;
+                        y: (parent.height - self.height) / 2;
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: 9px;
+                            height: 9px;
+                            border-radius: 4.5px;
+                            border-width: 1.5px;
+                            border-color: #94a3b8;
+                        }
+                        Path {
+                            x: 8px;
+                            y: 8px;
+                            width: 5px;
+                            height: 5px;
+                            commands: "M 1 1 L 4.5 4.5";
+                            stroke: #94a3b8;
+                            stroke-width: 1.5px;
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 100%;
+
+                        if dl_search.text == "": Text {
+                            text: "搜索游戏版本 / Mod / 整合包...";
+                            color: #64748b;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+
+                        dl_search := TextInput {
+                            width: 100%;
+                            height: 100%;
+                            color: #f1f5f9;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            edited => {
+                                root.filter_versions(
+                                    self.text,
+                                    root.filter_scope_idx,
+                                    root.filter_type_idx,
+                                    root.filter_loader_idx,
+                                    root.sort_idx
+                                );
+                            }
+                            accepted => {
+                                root.filter_versions(
+                                    self.text,
+                                    root.filter_scope_idx,
+                                    root.filter_type_idx,
+                                    root.filter_loader_idx,
+                                    root.sort_idx
+                                );
+                            }
+                        }
+                    }
+
+                    // 右侧提交箭头按钮
+                    Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        y: 5px;
+                        border-radius: 5px;
+                        background: search_go_touch.has-hover ? #192b3a : transparent;
+
+                        Path {
+                            x: 5px;
+                            y: 6px;
+                            width: 12px;
+                            height: 10px;
+                            commands: "M 1 5 L 10 5 M 6.5 1.5 L 10 5 L 6.5 8.5";
+                            stroke: #cbd5e1;
+                            stroke-width: 1.4px;
+                        }
+
+                        search_go_touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.filter_versions(
+                                    dl_search.text,
+                                    root.filter_scope_idx,
+                                    root.filter_type_idx,
+                                    root.filter_loader_idx,
+                                    root.sort_idx
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. 五大资源分类切换卡片行
+        HorizontalLayout {
+            height: 52px;
+            spacing: 10px;
+
+            DownloadCategoryCard {
+                title: "游戏版本";
+                subtitle: "原版 Minecraft";
+                use_grass_image: true;
+                active: root.active_category == 0;
+                clicked => {
+                    root.active_category = 0;
+                    root.action_triggered("已切换至「游戏版本 (原版 Minecraft)」目录");
+                }
+            }
+
+            DownloadCategoryCard {
+                title: "Mod";
+                subtitle: "海量模组";
+                icon_kind: "puzzle";
+                icon_color: #38bdf8;
+                active: root.active_category == 1;
+                clicked => {
+                    root.active_category = 1;
+                    root.action_triggered("已切换至「Mod 海量模组」目录");
+                }
+            }
+
+            DownloadCategoryCard {
+                title: "整合包";
+                subtitle: "精选整合包";
+                icon_kind: "cube";
+                icon_color: #e2e8f0;
+                active: root.active_category == 2;
+                clicked => {
+                    root.active_category = 2;
+                    root.action_triggered("已切换至「精选整合包」目录");
+                }
+            }
+
+            DownloadCategoryCard {
+                title: "资源包";
+                subtitle: "材质 / 光影 / 音效";
+                icon_kind: "brush";
+                icon_color: #f1f5f9;
+                active: root.active_category == 3;
+                clicked => {
+                    root.active_category = 3;
+                    root.action_triggered("已切换至「资源包 (材质/光影/音效)」目录");
+                }
+            }
+
+            DownloadCategoryCard {
+                title: "光影包";
+                subtitle: "光照 / 阴影 / 视觉增强";
+                icon_kind: "sun";
+                icon_color: #facc15;
+                active: root.active_category == 4;
+                clicked => {
+                    root.active_category = 4;
+                    root.action_triggered("已切换至「光影包 (光照/阴影/视觉增强)」目录");
+                }
+            }
+        }
+
+        // 3. 主体双栏区（固定 preferred-width: 0px 保证左右分栏比例在切换任意版本时恒定不偏移）
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 12px;
+
+            // ==================== 左栏：筛选条 + 可滚轮/拖拽滚动版本列表 ====================
+            VerticalLayout {
+                horizontal-stretch: 52;
+                preferred-width: 0px;
+                min-width: 0px;
+                spacing: 8px;
+
+                // 顶部筛选条件栏（固定 8px 右侧内边距，与下方列表行宽度严格对齐）
+                HorizontalLayout {
+                    height: 28px;
+                    spacing: 8px;
+                    padding-right: 8px;
+
+                    FilterDropdownChip {
+                        highlighted: true;
+                        text: root.filter_scope_idx == 0 ? "全部版本" : (root.filter_scope_idx == 1 ? "仅正式版" : "仅快照版");
+                        clicked => {
+                            root.filter_scope_idx = mod(root.filter_scope_idx + 1, 3);
+                            root.filter_versions(
+                                dl_search.text,
+                                root.filter_scope_idx,
+                                root.filter_type_idx,
+                                root.filter_loader_idx,
+                                root.sort_idx
+                            );
+                        }
+                    }
+
+                    FilterDropdownChip {
+                        text: root.filter_type_idx == 0 ? "版本类型" : (root.filter_type_idx == 1 ? "正式版" : "快照版");
+                        clicked => {
+                            root.filter_type_idx = mod(root.filter_type_idx + 1, 3);
+                            root.filter_versions(
+                                dl_search.text,
+                                root.filter_scope_idx,
+                                root.filter_type_idx,
+                                root.filter_loader_idx,
+                                root.sort_idx
+                            );
+                        }
+                    }
+
+                    FilterDropdownChip {
+                        text: root.filter_loader_idx == 0 ? "游戏加载器" : (root.filter_loader_idx == 1 ? "Fabric" : "Forge / NeoForge");
+                        clicked => {
+                            root.filter_loader_idx = mod(root.filter_loader_idx + 1, 3);
+                            root.filter_versions(
+                                dl_search.text,
+                                root.filter_scope_idx,
+                                root.filter_type_idx,
+                                root.filter_loader_idx,
+                                root.sort_idx
+                            );
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    FilterDropdownChip {
+                        text: root.sort_idx == 0 ? "按版本号排序" : "按发布时间排序";
+                        clicked => {
+                            root.sort_idx = mod(root.sort_idx + 1, 2);
+                            root.filter_versions(
+                                dl_search.text,
+                                root.filter_scope_idx,
+                                root.filter_type_idx,
+                                root.filter_loader_idx,
+                                root.sort_idx
+                            );
+                        }
+                    }
+                }
+
+                // 版本滚动列表区
+                ver_viewport := Rectangle {
+                    vertical-stretch: 1;
+                    clip: true;
+
+                    property <length> row_h: 54px;
+                    property <length> row_gap: 6px;
+                    property <length> total_content_h: max(0px, root.download_versions.length * self.row_h + max(0, root.download_versions.length - 1) * self.row_gap);
+                    property <bool> has_scrollbar: self.total_content_h > self.height;
+                    property <length> row_w: max(100px, self.width - 8px);
+                    property <length> max_scroll: max(0px, self.total_content_h - self.height);
+                    property <length> safe_max_scroll: max(1px, self.max_scroll);
+
+                    ver_flick := Flickable {
+                        width: ver_viewport.row_w;
+                        height: 100%;
+                        viewport-width: ver_viewport.row_w;
+                        viewport-height: max(self.height, ver_viewport.total_content_h);
+
+                        VerticalLayout {
+                            width: ver_viewport.row_w;
+                            spacing: ver_viewport.row_gap;
+                            alignment: start;
+
+                            for item in root.download_versions: Rectangle {
+                                width: ver_viewport.row_w;
+                                height: ver_viewport.row_h;
+                                border-radius: 9px;
+                                background: item.id == root.selected_version.id
+                                    ? #0d2a23e6
+                                    : (ver_row_touch.has-hover ? #132330e6 : #0c1720dc);
+                                border-width: item.id == root.selected_version.id ? 1.5px : 1px;
+                                border-color: item.id == root.selected_version.id ? #00e58b : #1c2e3d;
+
+                                // 先放置整行点击热区，右侧按钮区独立覆盖在上层
+                                ver_row_touch := TouchArea {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width - 96px;
+                                    height: 100%;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.select_version(item.id);
+                                    }
+                                    scroll-event(ev) => {
+                                        if (ver_viewport.max_scroll > 0px) {
+                                            ver_flick.viewport-y = max(-ver_viewport.max_scroll, min(0px, ver_flick.viewport-y + ev.delta-y * 0.6));
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    width: 100%;
+                                    height: 100%;
+                                    padding-left: 12px;
+                                    padding-right: 10px;
+                                    spacing: 10px;
+
+                                    Image {
+                                        width: 34px;
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        source: @image-url("assets/icon_grass.png");
+                                        image-fit: contain;
+                                    }
+
+                                    // 中间文字区：严禁在子 HorizontalLayout 上设置 alignment: start，使用尾部弹性占位符保证整行 100% 撑满对齐
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 4px;
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        preferred-width: 0px;
+
+                                        HorizontalLayout {
+                                            spacing: 6px;
+
+                                            Text {
+                                                text: item.title;
+                                                color: #ffffff;
+                                                font-size: 13px;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+
+                                            TagPill {
+                                                text: item.release_badge;
+                                                is_status: true;
+                                            }
+
+                                            TagPill {
+                                                text: item.type_badge;
+                                                is_status: false;
+                                            }
+
+                                            Rectangle { horizontal-stretch: 1; }
+                                        }
+
+                                        Text {
+                                            text: "发布于 " + item.release_date + "  ·  " + item.java_tag;
+                                            color: #94a3b8;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    // 右侧绿色「安装」按钮（固定宽度与右边距，所有行严格垂直对齐）
+                                    Rectangle {
+                                        width: 62px;
+                                        height: 28px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 6px;
+                                        background: inst_btn_touch.has-hover ? #18f29b : #00e58b;
+
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 4px;
+
+                                            VectorIcon {
+                                                width: 12px;
+                                                height: 12px;
+                                                y: (parent.height - self.height) / 2;
+                                                kind: "download";
+                                                icon_color: #042215;
+                                            }
+
+                                            Text {
+                                                text: "安装";
+                                                color: #042215;
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        inst_btn_touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.select_version(item.id);
+                                                root.install_version(item.id);
+                                            }
+                                            scroll-event(ev) => {
+                                                if (ver_viewport.max_scroll > 0px) {
+                                                    ver_flick.viewport-y = max(-ver_viewport.max_scroll, min(0px, ver_flick.viewport-y + ev.delta-y * 0.6));
+                                                    return accept;
+                                                }
+                                                return reject;
+                                            }
+                                        }
+                                    }
+
+                                    // 三点更多按钮
+                                    Rectangle {
+                                        width: 24px;
+                                        height: 28px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 5px;
+                                        background: more_row_touch.has-hover ? #1b2e3d : transparent;
+
+                                        VectorIcon {
+                                            x: 4px;
+                                            y: 6px;
+                                            width: 16px;
+                                            height: 16px;
+                                            kind: "dots";
+                                            icon_color: #94a3b8;
+                                        }
+
+                                        more_row_touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.select_version(item.id);
+                                                root.action_triggered("已展开版本操作菜单：" + item.title);
+                                            }
+                                            scroll-event(ev) => {
+                                                if (ver_viewport.max_scroll > 0px) {
+                                                    ver_flick.viewport-y = max(-ver_viewport.max_scroll, min(0px, ver_flick.viewport-y + ev.delta-y * 0.6));
+                                                    return accept;
+                                                }
+                                                return reject;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if ver_viewport.has_scrollbar: SlimScrollbar {
+                        x: parent.width - 4px;
+                        y: 2px;
+                        height: parent.height - 4px;
+                        visible_ratio: ver_viewport.height / ver_viewport.total_content_h;
+                        scroll_progress: (-ver_flick.viewport-y) / ver_viewport.safe_max_scroll;
+                    }
+                }
+            }
+
+            // ==================== 右栏：选中版本详情面板 ====================
+            GlassCard {
+                horizontal-stretch: 48;
+                preferred-width: 0px;
+                min-width: 0px;
+
+                VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    padding: 14px;
+                    spacing: 10px;
+
+                    // 上半部分：左侧版本主操作与预览图 + 右侧五项版本元数据框
+                    HorizontalLayout {
+                        height: 226px;
+                        spacing: 12px;
+
+                        // 左侧主信息列
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            preferred-width: 0px;
+                            spacing: 9px;
+
+                            // 版本大图标 + 标题 + 胶囊标签
+                            HorizontalLayout {
+                                height: 46px;
+                                spacing: 10px;
+
+                                Image {
+                                    width: 42px;
+                                    height: 42px;
+                                    y: 2px;
+                                    source: @image-url("assets/icon_grass.png");
+                                    image-fit: contain;
+                                }
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 5px;
+                                    horizontal-stretch: 1;
+                                    min-width: 0px;
+
+                                    Text {
+                                        text: root.selected_version.title;
+                                        color: #ffffff;
+                                        font-size: 17px;
+                                        font-weight: 800;
+                                        overflow: elide;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+
+                                        TagPill {
+                                            text: root.selected_version.release_badge;
+                                            is_status: true;
+                                        }
+
+                                        TagPill {
+                                            text: root.selected_version.type_badge;
+                                            is_status: false;
+                                        }
+
+                                        TagPill {
+                                            text: root.selected_version.java_tag;
+                                            is_status: false;
+                                        }
+
+                                        Rectangle { horizontal-stretch: 1; }
+                                    }
+                                }
+                            }
+
+                            // 「安装此版本」主按钮行
+                            HorizontalLayout {
+                                height: 34px;
+                                spacing: 8px;
+
+                                // 绿色组合安装按钮
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 34px;
+                                    border-radius: 7px;
+                                    background: main_inst_touch.has-hover ? #18f29b : #00e58b;
+
+                                    HorizontalLayout {
+                                        // 左侧主点击区
+                                        HorizontalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 6px;
+
+                                            VectorIcon {
+                                                width: 14px;
+                                                height: 14px;
+                                                y: (parent.height - self.height) / 2;
+                                                kind: "download";
+                                                icon_color: #042215;
+                                            }
+
+                                            Text {
+                                                text: "安装此版本";
+                                                color: #042215;
+                                                font-size: 13px;
+                                                font-weight: 800;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // 分割竖线
+                                        Rectangle {
+                                            width: 1px;
+                                            height: 20px;
+                                            y: 7px;
+                                            background: #04221538;
+                                        }
+
+                                        // 右侧下拉箭头区
+                                        Rectangle {
+                                            width: 28px;
+                                            height: 100%;
+
+                                            Path {
+                                                x: 10px;
+                                                y: 14px;
+                                                width: 8px;
+                                                height: 5px;
+                                                commands: "M 1 1 L 4 4 L 7 1";
+                                                stroke: #042215;
+                                                stroke-width: 1.6px;
+                                            }
+                                        }
+                                    }
+
+                                    main_inst_touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.install_version(root.selected_version.id);
+                                        }
+                                    }
+                                }
+
+                                // 更多操作方形按钮
+                                Rectangle {
+                                    width: 34px;
+                                    height: 34px;
+                                    border-radius: 7px;
+                                    background: detail_more_touch.has-hover ? #1a2d3d : #12212e;
+                                    border-width: 1px;
+                                    border-color: #243848;
+
+                                    VectorIcon {
+                                        x: 9px;
+                                        y: 9px;
+                                        width: 16px;
+                                        height: 16px;
+                                        kind: "dots";
+                                        icon_color: #cbd5e1;
+                                    }
+
+                                    detail_more_touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.action_triggered("已打开 " + root.selected_version.title + " 附加安装配置");
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 四个详情子标签（版本介绍、版本文件、配置要求、相关资源，真实切换下方展示数据）
+                            HorizontalLayout {
+                                height: 26px;
+                                spacing: 6px;
+
+                                for tab_item[idx] in [
+                                    "版本介绍",
+                                    "版本文件",
+                                    "配置要求",
+                                    "相关资源"
+                                ]: Rectangle {
+                                    horizontal-stretch: 1;
+                                    preferred-width: 0px;
+                                    min-width: 0px;
+                                    height: 26px;
+                                    border-radius: 6px;
+                                    background: root.active_detail_tab == idx ? #0c2e25 : #111f2b;
+                                    border-width: 1px;
+                                    border-color: root.active_detail_tab == idx ? #00e58b88 : #1f3242;
+
+                                    Text {
+                                        text: tab_item;
+                                        color: root.active_detail_tab == idx ? #00e58b : #cbd5e1;
+                                        font-size: 11px;
+                                        font-weight: root.active_detail_tab == idx ? 700 : 500;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.active_detail_tab = idx;
+                                            root.action_triggered("正在查看 " + root.selected_version.title + " · " + tab_item);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 樱花生物群系预览轮播图
+                            Rectangle {
+                                vertical-stretch: 1;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: #223646;
+                                clip: true;
+
+                                Image {
+                                    width: 100%;
+                                    height: 100%;
+                                    source: root.banner_idx == 0
+                                        ? @image-url("assets/banner_cherry.png")
+                                        : (root.banner_idx == 1 ? @image-url("assets/banner_update.png") : @image-url("assets/banner_rpg.png"));
+                                    image-fit: cover;
+                                }
+
+                                // 左侧上一张按钮
+                                Rectangle {
+                                    x: 6px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 22px;
+                                    height: 26px;
+                                    border-radius: 5px;
+                                    background: prev_touch.has-hover ? #0f1e29ee : #09131acc;
+
+                                    Path {
+                                        x: 8px;
+                                        y: 8px;
+                                        width: 6px;
+                                        height: 10px;
+                                        commands: "M 5 1 L 1 5 L 5 9";
+                                        stroke: #f1f5f9;
+                                        stroke-width: 1.5px;
+                                    }
+
+                                    prev_touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.banner_idx = mod(root.banner_idx + 2, 3);
+                                        }
+                                    }
+                                }
+
+                                // 右侧下一张按钮
+                                Rectangle {
+                                    x: parent.width - self.width - 6px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 22px;
+                                    height: 26px;
+                                    border-radius: 5px;
+                                    background: next_touch.has-hover ? #0f1e29ee : #09131acc;
+
+                                    Path {
+                                        x: 8px;
+                                        y: 8px;
+                                        width: 6px;
+                                        height: 10px;
+                                        commands: "M 1 1 L 5 5 L 1 9";
+                                        stroke: #f1f5f9;
+                                        stroke-width: 1.5px;
+                                    }
+
+                                    next_touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.banner_idx = mod(root.banner_idx + 1, 3);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 右侧版本五项元数据信息卡片（加宽至 146px 完整展示加载器列表）
+                        Rectangle {
+                            width: 146px;
+                            height: 100%;
+                            border-radius: 9px;
+                            background: #09131bc8;
+                            border-width: 1px;
+                            border-color: #192b3a;
+
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 7px;
+
+                                VersionMetaItem {
+                                    icon_kind: "cube";
+                                    label: "游戏类型";
+                                    value: root.selected_version.type_badge;
+                                }
+
+                                VersionMetaItem {
+                                    icon_kind: "shield";
+                                    label: "发布版本";
+                                    value: root.selected_version.id;
+                                }
+
+                                VersionMetaItem {
+                                    icon_kind: "calendar";
+                                    label: "发布时间";
+                                    value: root.selected_version.release_date;
+                                }
+
+                                VersionMetaItem {
+                                    icon_kind: "puzzle";
+                                    label: "支持加载器";
+                                    value: root.selected_version.supported_loaders;
+                                }
+
+                                VersionMetaItem {
+                                    icon_kind: "download";
+                                    label: "推荐 Java 版本";
+                                    value: root.selected_version.java_tag;
+                                }
+                            }
+                        }
+                    }
+
+                    // 下半部分：版本文字介绍与四个子标签动态详情内容
+                    VerticalLayout {
+                        vertical-stretch: 1;
+                        spacing: 6px;
+
+                        Text {
+                            text: root.selected_version.summary;
+                            color: #cbd5e1;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+
+                        // 动态小标题（随「版本介绍 / 版本文件 / 配置要求 / 相关资源」子标签同步切换）
+                        HorizontalLayout {
+                            height: 20px;
+                            spacing: 6px;
+
+                            VectorIcon {
+                                width: 14px;
+                                height: 14px;
+                                y: 3px;
+                                kind: root.active_detail_tab == 0
+                                    ? "star"
+                                    : (root.active_detail_tab == 1 ? "folder" : (root.active_detail_tab == 2 ? "env" : "puzzle"));
+                                icon_color: root.active_detail_tab == 0 ? #a855f7 : #00e58b;
+                            }
+
+                            Text {
+                                text: root.active_detail_tab == 0
+                                    ? "主要更新内容"
+                                    : (root.active_detail_tab == 1
+                                        ? "版本核心文件清单 (Mojang Piston)"
+                                        : (root.active_detail_tab == 2 ? "运行环境与系统配置要求" : "推荐兼容加载器与模组资源"));
+                                color: #f8fafc;
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        // 底部列表与右下角「查看官方更新日志」按钮
+                        HorizontalLayout {
+                            vertical-stretch: 1;
+                            spacing: 8px;
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                preferred-width: 0px;
+                                spacing: 3px;
+                                alignment: start;
+
+                                FeatureBulletRow {
+                                    text: root.active_detail_tab == 0
+                                        ? root.selected_version.feature_1
+                                        : (root.active_detail_tab == 1
+                                            ? root.selected_version.file_1
+                                            : (root.active_detail_tab == 2 ? root.selected_version.req_1 : root.selected_version.res_1));
+                                }
+                                FeatureBulletRow {
+                                    text: root.active_detail_tab == 0
+                                        ? root.selected_version.feature_2
+                                        : (root.active_detail_tab == 1
+                                            ? root.selected_version.file_2
+                                            : (root.active_detail_tab == 2 ? root.selected_version.req_2 : root.selected_version.res_2));
+                                }
+                                FeatureBulletRow {
+                                    text: root.active_detail_tab == 0
+                                        ? root.selected_version.feature_3
+                                        : (root.active_detail_tab == 1
+                                            ? root.selected_version.file_3
+                                            : (root.active_detail_tab == 2 ? root.selected_version.req_3 : root.selected_version.res_3));
+                                }
+                                FeatureBulletRow {
+                                    text: root.active_detail_tab == 0
+                                        ? root.selected_version.feature_4
+                                        : (root.active_detail_tab == 1
+                                            ? root.selected_version.file_4
+                                            : (root.active_detail_tab == 2 ? root.selected_version.req_4 : root.selected_version.res_4));
+                                }
+                                FeatureBulletRow {
+                                    text: root.active_detail_tab == 0
+                                        ? root.selected_version.feature_5
+                                        : (root.active_detail_tab == 1
+                                            ? root.selected_version.file_5
+                                            : (root.active_detail_tab == 2 ? root.selected_version.req_5 : root.selected_version.res_5));
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: end;
+
+                                Rectangle {
+                                    width: 136px;
+                                    height: 30px;
+                                    border-radius: 7px;
+                                    background: wiki_touch.has-hover ? #182b3b : #101e2a;
+                                    border-width: 1px;
+                                    border-color: #243848;
+
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 6px;
+
+                                        VectorIcon {
+                                            width: 13px;
+                                            height: 13px;
+                                            y: (parent.height - self.height) / 2;
+                                            kind: "external";
+                                            icon_color: #94a3b8;
+                                        }
+
+                                        Text {
+                                            text: "查看官方更新日志";
+                                            color: #e2e8f0;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    wiki_touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.action_triggered(
+                                                "已打开官方版本日志：" + root.selected_version.title + " (" + root.selected_version.changelog_url + ")"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

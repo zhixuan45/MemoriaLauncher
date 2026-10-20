@@ -3,6 +3,21 @@ use thiserror::Error;
 /// 启动器统一错误枚举与语义化错误码
 #[derive(Debug, Error)]
 pub enum LauncherError {
+    #[error("不安全的游戏路径: {0}")]
+    UnsafePath(String),
+
+    #[error("版本元数据异常: {0}")]
+    InvalidMetadata(String),
+
+    #[error("游戏文件缺失或损坏: {0}")]
+    MissingGameFiles(String),
+
+    #[error("Java 运行环境不匹配: {0}")]
+    JavaUnavailable(String),
+
+    #[error("暂不支持: {0}")]
+    Unsupported(String),
+
     #[error("无效的游戏版本: {0}")]
     InvalidVersion(String),
 
