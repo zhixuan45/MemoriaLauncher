@@ -1,7 +1,9 @@
 use crate::app::{Launcher, Message as AppMessage};
 use crate::assets::{icon, Icon};
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
-use iced::widget::{button, column, container, pick_list, row, scrollable, toggler, Space};
+use iced::widget::{
+    button, column, container, pick_list, row, scrollable, text_input, toggler, Space,
+};
 use iced::{Alignment, Color, Element, Fill, Length};
 
 const TABS: [&str; 7] = [
@@ -24,6 +26,7 @@ const DATES: [&str; 3] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY"];
 #[derive(Debug, Clone)]
 pub enum Message {
     Tab(usize),
+    Search(String),
     Toggle(usize, bool),
     Language(&'static str),
     Region(&'static str),
@@ -34,6 +37,7 @@ pub enum Message {
 
 pub struct State {
     tab: usize,
+    query: String,
     switches: [bool; 5],
     language: &'static str,
     region: &'static str,
@@ -45,6 +49,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             tab: 0,
+            query: String::new(),
             switches: [false, true, true, false, false],
             language: LANGUAGES[0],
             region: REGIONS[0],
@@ -57,7 +62,11 @@ impl Default for State {
 impl State {
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::Tab(tab) => self.tab = tab.min(TABS.len() - 1),
+            Message::Tab(tab) => {
+                self.tab = tab.min(TABS.len() - 1);
+                self.query.clear();
+            }
+            Message::Search(query) => self.query = query,
             Message::Toggle(index, value) => {
                 if let Some(setting) = self.switches.get_mut(index) {
                     *setting = value;
@@ -94,7 +103,44 @@ pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
                 .on_press(dispatch(Message::Tab(index))),
         );
     }
-    let body: Element<'_, AppMessage> = if state.tab == 0 {
+    let body: Element<'_, AppMessage> = if !state.query.trim().is_empty() {
+        let query = state.query.trim().to_lowercase();
+        let entries = [
+            (
+                "常规 / 启动器行为 / 语言与地区 / 账户与数据 / 更新 / 快捷操作",
+                0,
+            ),
+            ("游戏设置 / 内存 / 分辨率", 1),
+            ("下载安装 / 下载源 / 并行任务", 2),
+            ("环境配置 / Java / 运行环境", 3),
+            ("AI 设置 / 模型 / API / MCP", 4),
+            ("界面外观 / 壁纸 / 主题 / 缩放", 5),
+            ("高级设置 / 日志 / 诊断", 6),
+        ];
+        let mut results = column![].spacing(10);
+        let mut found = false;
+        for (title, tab) in entries {
+            if title.to_lowercase().contains(&query) {
+                found = true;
+                results = results.push(
+                    button(label(title, 14.))
+                        .padding(16)
+                        .width(Fill)
+                        .style(theme::quiet)
+                        .on_press(dispatch(Message::Tab(tab))),
+                );
+            }
+        }
+        if !found {
+            results = results.push(label("没有匹配的设置项", 14.).color(MUTED));
+        }
+        container(scrollable(results).direction(theme::scroll_direction()))
+            .padding(20)
+            .width(Fill)
+            .height(Fill)
+            .style(theme::panel)
+            .into()
+    } else if state.tab == 0 {
         let top_height = if app.viewport.height < 740. {
             278.
         } else {
@@ -146,8 +192,25 @@ pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
         container(
             column![
                 icon(Icon::Settings, PURPLE, 36.),
-                bold(format!("{} · 待迁移", TABS[state.tab]), 24.),
-                label("本次先迁移主页与常规设置的卡片布局。", 14.).color(MUTED),
+                bold(TABS[state.tab], 24.),
+                label(
+                    [
+                        "",
+                        "内存分配、分辨率与游戏启动参数",
+                        "下载源、并行任务与安装路径",
+                        "Java 运行环境与路径检测",
+                        "模型提供商、API 连接与 MCP",
+                        "壁纸、主题与界面缩放",
+                        "日志、诊断与实验功能"
+                    ][state.tab],
+                    14.
+                )
+                .color(MUTED),
+                label("此模块的配置服务尚未接入。", 12.).color(MUTED),
+                button(label("返回常规设置", 13.))
+                    .on_press(dispatch(Message::Tab(0)))
+                    .style(theme::action)
+                    .padding(12),
             ]
             .spacing(16),
         )
@@ -161,7 +224,13 @@ pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
         column![
             row![
                 bold("设置", 30.),
-                label("自定义你的 Minecraft 启动器", 12.).color(MUTED)
+                label("自定义你的 Minecraft 启动器", 12.).color(MUTED),
+                Space::new().width(Fill),
+                text_input("搜索设置项…", &state.query)
+                    .on_input(|q| dispatch(Message::Search(q)))
+                    .padding(10)
+                    .size(12)
+                    .width(220)
             ]
             .spacing(16)
             .align_y(Alignment::End),
@@ -189,7 +258,9 @@ fn panel<'a>(
             row![icon(kind, tint, 20.), bold(title, 15.)]
                 .spacing(10)
                 .align_y(Alignment::Center),
-            scrollable(content).height(Fill),
+            scrollable(content)
+                .direction(theme::scroll_direction())
+                .height(Fill),
         ]
         .spacing(14),
     )

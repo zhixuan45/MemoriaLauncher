@@ -367,7 +367,9 @@ fn instances(app: &Launcher) -> Element<'_, Message> {
                     Message::Refresh
                 ))
             ),
-            scrollable(list).height(Fill),
+            scrollable(list)
+                .direction(theme::scroll_direction())
+                .height(Fill),
         ]
         .spacing(10),
     )
@@ -412,7 +414,9 @@ fn changelog() -> Element<'static, Message> {
                 "更新日志",
                 Some(("查看全部", Message::Changelogs))
             ),
-            scrollable(entries).height(Fill),
+            scrollable(entries)
+                .direction(theme::scroll_direction())
+                .height(Fill),
         ]
         .spacing(16),
     )
@@ -489,7 +493,9 @@ fn queue(app: &Launcher) -> Element<'_, Message> {
                     Message::ToggleAllTasks
                 ))
             ),
-            scrollable(entries).height(Fill),
+            scrollable(entries)
+                .direction(theme::scroll_direction())
+                .height(Fill),
         ]
         .spacing(22),
     )

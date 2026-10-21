@@ -115,3 +115,27 @@ pub fn pill(value: impl Into<String>, active: bool) -> Element<'static, Message>
         })
         .into()
 }
+
+/// Reserve a narrow gutter so scrollbars never cover buttons or text.
+pub fn scroll_direction() -> iced::widget::scrollable::Direction {
+    iced::widget::scrollable::Direction::Vertical(
+        iced::widget::scrollable::Scrollbar::new()
+            .width(4)
+            .scroller_width(4)
+            .spacing(8),
+    )
+}
+
+pub fn launcher() -> Theme {
+    Theme::custom(
+        "Memoria",
+        iced::theme::Palette {
+            background: Color::from_rgb(0.025, 0.065, 0.085),
+            text: WHITE,
+            primary: GREEN,
+            success: GREEN,
+            warning: Color::from_rgb(1., 0.75, 0.25),
+            danger: Color::from_rgb(0.95, 0.25, 0.35),
+        },
+    )
+}

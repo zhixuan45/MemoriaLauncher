@@ -1,2 +1,3 @@
-[build]
-target-dir = "C:/Users/JuziD/launcher_target"
+# Build artifacts use Cargo's portable workspace target directory.
+# Override with CARGO_TARGET_DIR locally when a shared build cache is desired.
+

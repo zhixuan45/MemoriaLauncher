@@ -74,8 +74,8 @@ pub fn save(app: &mut Launcher, screenshot: window::Screenshot) -> Task<Message>
                 0 => "home",
                 1 => "selected-paused",
                 2 => "layout",
-                3 => "download-pending",
-                4 => "ai-pending",
+                3 => "download",
+                4 => "ai",
                 5 => "settings-aligned",
                 6 => "instance-dialog",
                 _ => "restored",
@@ -151,7 +151,11 @@ pub fn next(app: &mut Launcher) -> Task<Message> {
             assert_eq!(app.instances[0].instance.id, "inst-vanilla-121");
         }
         3 => {
-            let _ = app.update(Message::Navigate(Page::Download));
+            // Preserve the asynchronous catalogue load, as a real sidebar click does.
+            return Task::batch([
+                app.update(Message::Navigate(Page::Download)),
+                delayed(Message::Capture),
+            ]);
         }
         4 => {
             let _ = app.update(Message::Navigate(Page::Ai));
@@ -162,7 +166,6 @@ pub fn next(app: &mut Launcher) -> Task<Message> {
         6 => {
             let _ = app.update(Message::Navigate(Page::Home));
             let _ = app.update(Message::ResetLayout);
-            let _ = app.update(Message::ToggleLayout);
             let _ = app.update(Message::EditInstance);
         }
         7 => {

@@ -17,7 +17,8 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
     let page = match app.page {
         Page::Home => app.home(),
         Page::Settings => crate::settings::view(app),
-        page => pending(page),
+        Page::Download => crate::download::view(&app.download).map(Message::Download),
+        Page::Ai => crate::ai::view(&app.ai, app.viewport.width - 194.).map(Message::Ai),
     };
     let main = stack![
         iced::widget::image(ART.wallpaper.clone())
@@ -136,7 +137,12 @@ fn sidebar(app: &Launcher) -> Element<'_, Message> {
         .on_press(Message::Navigate(page))
         .style(move |theme, status| {
             if active {
-                theme::selected(theme, status)
+                let mut style = theme::selected(theme, status);
+                if page == Page::Ai {
+                    style.border.color = PURPLE;
+                    style.background = Some(Color::from_rgba(0.36, 0.18, 0.53, 0.60).into());
+                }
+                style
             } else {
                 let mut style = theme::quiet(theme, status);
                 if !matches!(status, button::Status::Hovered) {
@@ -208,61 +214,6 @@ fn sidebar(app: &Launcher) -> Element<'_, Message> {
             })
     ])
     .width(194)
-    .height(Fill)
-    .into()
-}
-
-fn pending(page: Page) -> Element<'static, Message> {
-    let (description, details) = match page {
-        Page::Download => (
-            "选择版本、Mod 或整合包，快速开始你的冒险",
-            "待迁移：五大资源分类、版本搜索筛选、版本列表、四页签详情与安装队列。",
-        ),
-        Page::Ai => (
-            "用 AI 让你的 Minecraft 更简单，更有趣",
-            "待迁移：需求输入、快捷提问、实用示例与分步骤任务列表。",
-        ),
-        Page::Settings => (
-            "自定义你的 Minecraft 启动器",
-            "待迁移：七个设置分类、启动器行为、语言地区、账户与数据、更新和快捷操作。",
-        ),
-        Page::Home => ("", ""),
-    };
-    container(
-        column![
-            Space::new().height(48),
-            bold(page.title(), 36.),
-            label(description, 16.).color(MUTED),
-            Space::new().height(30),
-            container(
-                column![
-                    icon(
-                        Icon::Info,
-                        if page == Page::Ai { PURPLE } else { GREEN },
-                        34.
-                    ),
-                    bold("此页面尚未迁移到 iced", 23.),
-                    label(details, 14.).color(MUTED),
-                    label(
-                        "本次优先完成主页。原 Slint 页面保留在源码中，供后续迁移核对。",
-                        13.
-                    )
-                    .color(MUTED),
-                    button(label("返回主页", 14.).color(Color::BLACK))
-                        .on_press(Message::Navigate(Page::Home))
-                        .style(theme::action)
-                        .padding([12, 24]),
-                ]
-                .spacing(18)
-            )
-            .padding(28)
-            .width(Fill)
-            .style(theme::panel)
-        ]
-        .spacing(12),
-    )
-    .padding(30)
-    .width(Fill)
     .height(Fill)
     .into()
 }
@@ -340,7 +291,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 );
         }
     }
-    let dialog = container(scrollable(content))
+    let dialog = container(scrollable(content).direction(theme::scroll_direction()))
         .padding(24)
         .width(580)
         .max_height(640)

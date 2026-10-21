@@ -103,6 +103,8 @@ pub enum Message {
     Profile,
     CycleProfile,
     Settings(crate::settings::Message),
+    Download(crate::download::Message),
+    Ai(crate::ai::Message),
     Capture,
     Captured(window::Screenshot),
     VerificationNext,
@@ -124,6 +126,8 @@ pub struct Launcher {
     pub modal: Option<Modal>,
     pub profile: usize,
     pub settings: crate::settings::State,
+    pub download: crate::download::State,
+    pub ai: crate::ai::State,
     pub verification: verification::Verification,
 }
 
@@ -153,6 +157,8 @@ impl Launcher {
             modal: None,
             profile: 0,
             settings: crate::settings::State::default(),
+            download: crate::download::State::default(),
+            ai: crate::ai::State::default(),
             verification: verification::Verification::from_args(),
         };
         (state, Self::load())
@@ -208,7 +214,7 @@ impl Launcher {
                         }
                         self.instances = instances;
                         self.tasks = tasks;
-                        self.status = "主页预览 · 实例与下载队列使用示例数据".into();
+                        self.status = "界面预览 · 实例与任务使用示例数据".into();
                     }
                     Err(e) => self.status = format!("读取失败：{e}"),
                 }
@@ -220,6 +226,10 @@ impl Launcher {
                 self.page = page;
                 self.modal = None;
                 self.drag = None;
+                self.edit_layout = false;
+                if page == Page::Download {
+                    return self.download.ensure_loaded().map(Message::Download);
+                }
             }
             Message::SelectInstance(id) => {
                 if self.instances.iter().any(|i| i.instance.id == id) {
@@ -336,6 +346,10 @@ impl Launcher {
             Message::Profile => self.modal = Some(Modal::Profile),
             Message::CycleProfile => self.profile = (self.profile + 1) % 2,
             Message::Settings(message) => self.settings.update(message),
+            Message::Download(message) => {
+                return self.download.update(message).map(Message::Download)
+            }
+            Message::Ai(message) => self.ai.update(message),
             Message::Capture => {
                 return window::latest()
                     .and_then(window::screenshot)
@@ -348,7 +362,12 @@ impl Launcher {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(|event, _, _| Some(Message::Event(event)))
+        let window = event::listen_with(window_event);
+        if self.edit_layout && self.page == Page::Home && self.modal.is_none() {
+            Subscription::batch([window, event::listen_with(layout_event)])
+        } else {
+            window
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -359,6 +378,30 @@ impl Launcher {
     }
 }
 
+// Ordinary pointer motion is handled by widgets, without rebuilding application state.
+// Keep release events even when captured so a drag cannot remain stuck over a button.
+fn layout_event(event: Event, _: event::Status, _: window::Id) -> Option<Message> {
+    matches!(
+        event,
+        Event::Mouse(
+            mouse::Event::CursorMoved { .. } | mouse::Event::ButtonReleased(mouse::Button::Left)
+        )
+    )
+    .then_some(Message::Event(event))
+}
+
+fn window_event(event: Event, _: event::Status, _: window::Id) -> Option<Message> {
+    matches!(
+        event,
+        Event::Window(window::Event::Resized(_) | window::Event::Unfocused)
+            | Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            })
+    )
+    .then_some(Message::Event(event))
+}
+
 pub fn snap(value: f32) -> f32 {
     (value / 16.).round() * 16.
 }
@@ -366,6 +409,20 @@ pub fn snap(value: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscriptions_ignore_normal_pointer_traffic_but_keep_drag_release() {
+        let id = window::Id::unique();
+        let motion = Event::Mouse(mouse::Event::CursorMoved {
+            position: Point::new(80., 160.),
+        });
+        assert!(window_event(motion.clone(), event::Status::Ignored, id).is_none());
+        assert!(layout_event(motion, event::Status::Captured, id).is_some());
+        let release = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+        assert!(layout_event(release, event::Status::Captured, id).is_some());
+        let redraw = Event::Window(window::Event::RedrawRequested(std::time::Instant::now()));
+        assert!(window_event(redraw, event::Status::Ignored, id).is_none());
+    }
 
     #[test]
     fn grid_and_protected_cards() {
