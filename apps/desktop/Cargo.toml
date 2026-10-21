@@ -6,7 +6,5 @@ edition = "2021"
 [dependencies]
 mc-core = { workspace = true }
 tokio = { workspace = true }
-slint = "1.9"
-
-[build-dependencies]
-slint-build = "1.9"
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "image-without-codecs", "svg", "tokio", "advanced-shaping"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
