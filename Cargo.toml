@@ -23,3 +23,8 @@ tracing-subscriber = "0.3"
 
 # 本地模块
 mc-core = { path = "crates/mc-core" }
+
+# MSVC can fail with D8050 when cc-rs emits /Z7 for ring's native code.
+# Keep debug information for our Rust code while disabling it for ring only.
+[profile.dev.package.ring]
+debug = 0
