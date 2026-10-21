@@ -1,6 +1,6 @@
 use iced::widget::{image, svg};
 use iced::{Color, ContentFit};
-use std::sync::LazyLock;
+use std::{cell::RefCell, collections::HashMap, sync::LazyLock};
 
 pub struct Assets {
     pub wallpaper: image::Handle,
@@ -38,7 +38,7 @@ pub fn picture(handle: &image::Handle, size: f32) -> iced::widget::Image {
         .content_fit(ContentFit::Contain)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     Home,
     Download,
@@ -60,7 +60,26 @@ pub enum Icon {
     Info,
 }
 
+// Stable handles avoid rebuilding and hashing SVG XML on every view update.
+// Only the finite palette used by the interface is cached, independently of size.
+type IconKey = (Icon, [u8; 4]);
+thread_local! {
+    static ICONS: RefCell<HashMap<IconKey, svg::Handle>> = RefCell::new(HashMap::new());
+}
+
 pub fn icon(kind: Icon, color: Color, size: f32) -> iced::widget::Svg<'static> {
+    let rgba = color.into_rgba8();
+    let handle = ICONS.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry((kind, rgba))
+            .or_insert_with(|| make_icon(kind, rgba))
+            .clone()
+    });
+    svg(handle).width(size).height(size)
+}
+
+fn make_icon(kind: Icon, rgba: [u8; 4]) -> svg::Handle {
     let path = match kind {
         Icon::Home => "M3 11 12 3l9 8M5 10v11h5v-7h4v7h5V10",
         Icon::Download => "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
@@ -81,21 +100,15 @@ pub fn icon(kind: Icon, color: Color, size: f32) -> iced::widget::Svg<'static> {
         Icon::Edit => "M3 3h7v7H3Zm11 0h7v7h-7ZM3 14h7v7H3Zm11 0h7v7h-7Z",
         Icon::Info => "M12 8h.1m-.1 4v5M22 12a10 10 0 1 0-20 0 10 10 0 0 0 20 0",
     };
-    let color = format!(
-        "rgb({},{},{})",
-        (color.r * 255.) as u8,
-        (color.g * 255.) as u8,
-        (color.b * 255.) as u8
-    );
+    let color = format!("rgb({},{},{})", rgba[0], rgba[1], rgba[2]);
     let fill = if matches!(kind, Icon::Play | Icon::Spark) {
         color.as_str()
     } else {
         "none"
     };
+    let opacity = rgba[3] as f32 / 255.;
     let xml = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="{fill}" stroke="{color}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="{fill}" stroke="{color}" opacity="{opacity}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
     );
-    svg(svg::Handle::from_memory(xml.into_bytes()))
-        .width(size)
-        .height(size)
+    svg::Handle::from_memory(xml.into_bytes())
 }

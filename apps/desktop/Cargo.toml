@@ -6,5 +6,9 @@ edition = "2021"
 [dependencies]
 mc-core = { workspace = true }
 tokio = { workspace = true }
-iced = { version = "0.14", default-features = false, features = ["tiny-skia", "image-without-codecs", "svg", "tokio", "advanced-shaping"] }
+iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "x11", "wayland", "image-without-codecs", "svg", "tokio", "advanced-shaping"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+iced_test = "0.14"
+
