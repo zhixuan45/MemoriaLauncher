@@ -9,8 +9,6 @@ use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, time::timeout};
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    ClientIdChanged(String),
-    RedirectChanged(String),
     BeginLogin,
     LoginFinished(Result<(AuthAccount, String, String), String>),
     Select(String),
@@ -19,8 +17,8 @@ pub enum Message {
 }
 
 pub struct State {
-    pub client_id: String,
-    pub redirect_uri: String,
+    client_id: String,
+    redirect_uri: String,
     pub accounts: Vec<AuthAccount>,
     pub selected: Option<String>,
     pub busy: bool,
@@ -32,29 +30,48 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            client_id: std::env::var("MC_LAUNCHER_CLIENT_ID").unwrap_or_default(),
+            // An application registration is provided by the publisher at build time.
+            // The runtime override exists for developers and local integration tests.
+            client_id: configured_client_id(),
             redirect_uri: std::env::var("MC_LAUNCHER_REDIRECT_URI")
                 .unwrap_or_else(|_| "http://localhost:53682/oauth/callback".into()),
             accounts: Vec::new(),
             selected: None,
             busy: false,
-            notice: "尚未登录 Microsoft 正版账号。登录状态仅在本次启动器运行期间保留。".into(),
+            notice: "点击「使用 Microsoft 登录」，在官方浏览器页面完成登录。登录状态仅在本次启动器运行期间保留。".into(),
             credentials: Arc::new(MemoryCredentialStore::default()),
             configurations: HashMap::new(),
         }
     }
 }
 
+/// The public client ID is not a secret; release builds embed the publisher's app ID.
+fn configured_client_id() -> String {
+    std::env::var("MC_LAUNCHER_CLIENT_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| option_env!("MEMORIA_MICROSOFT_CLIENT_ID")
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned))
+        .unwrap_or_default()
+}
+
 impl State {
+    pub fn has_microsoft_app(&self) -> bool {
+        !self.client_id.trim().is_empty()
+    }
+
     pub fn active(&self) -> Option<&AuthAccount> {
         self.selected.as_ref().and_then(|id| self.accounts.iter().find(|a| &a.id == id))
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::ClientIdChanged(value) if !self.busy => self.client_id = value,
-            Message::RedirectChanged(value) if !self.busy => self.redirect_uri = value,
             Message::BeginLogin if !self.busy => {
+                if !self.has_microsoft_app() {
+                    self.notice = "当前发行版尚未配置 Microsoft 登录应用，请联系启动器开发者或更新发行版。".into();
+                    return Task::none();
+                }
                 let config = match MicrosoftAuthConfig::new(
                     self.client_id.trim(), self.redirect_uri.trim(),
                 ) {
@@ -253,6 +270,13 @@ mod tests {
         assert!(Callback::parse("http://0.0.0.0:53682/oauth/callback").is_err());
         assert!(Callback::parse("http://localhost:0/oauth/callback").is_err());
         assert!(Callback::parse("http://localhost:53682/oauth/../admin").is_err());
+    }
+
+    #[test]
+    fn packaged_id_can_be_supplied_without_user_input() {
+        let state = State::default();
+        assert_eq!(state.has_microsoft_app(), !state.client_id.trim().is_empty());
+        assert!(state.redirect_uri.starts_with("http://localhost:"));
     }
 
     #[test]
