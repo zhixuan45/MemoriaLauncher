@@ -159,7 +159,7 @@ impl Callback {
         }
         let port = port.parse::<u16>().map_err(|_| "OAuth 回调端口无效。")?;
         if port == 0 || remainder.is_empty()
-            || remainder.chars().any(|c| c == '?' || c == '#' || c == '\\u{5c}')
+            || remainder.chars().any(|c| c == '?' || c == '#' || c == '\\')
             || remainder.contains("..")
         {
             return Err("OAuth 回调路径或端口无效。".into());
