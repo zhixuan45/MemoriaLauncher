@@ -1,12 +1,13 @@
 use crate::app::{Card, Launcher, Message};
 use crate::assets::{icon, picture, Icon, ART};
 use crate::models::{CHANGELOG, FEATURE_DESCRIPTIONS, FEATURE_TITLES};
+use crate::motion_renderer::Element;
 use crate::shell::icon_button;
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
 use iced::widget::{
     button, column, container, mouse_area, pin, progress_bar, row, scrollable, stack, Space,
 };
-use iced::{Alignment, Border, Color, ContentFit, Element, Fill, Length, Size};
+use iced::{Alignment, Border, Color, ContentFit, Fill, Length, Size};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Rect {
@@ -35,7 +36,7 @@ pub fn bounds(card: Card, size: Size) -> Rect {
     }
 }
 
-pub fn view(app: &Launcher) -> Element<'_, Message> {
+pub fn view(app: &Launcher, cards: f32) -> Element<'_, Message> {
     let size = Size::new(
         (app.viewport.width - 194.).max(1.),
         (app.viewport.height - 40.).max(1.),
@@ -118,7 +119,7 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
                 .clip(true)
                 .into()
         };
-        layers.push(pin(body).x(x).y(y).into());
+        layers.push(pin(crate::motion::pop(body, cards, true)).x(x).y(y).into());
     }
     stack(layers).width(Fill).height(Fill).into()
 }
@@ -224,14 +225,22 @@ fn launch(app: &Launcher) -> Element<'_, Message> {
     let start = button(
         row![
             icon(Icon::Play, Color::from_rgb(0., 0.1, 0.08), 21.),
-            bold("开始游戏", 18.).color(Color::from_rgb(0., 0.1, 0.08))
+            bold(
+                if app.launching {
+                    "游戏运行中…"
+                } else {
+                    "开始游戏"
+                },
+                18.
+            )
+            .color(Color::from_rgb(0., 0.1, 0.08))
         ]
         .spacing(10)
         .align_y(Alignment::Center),
     )
     .padding([12, 20])
     .width(Length::FillPortion(6))
-    .on_press(Message::Launch)
+    .on_press_maybe((!app.launching && !app.loading).then_some(Message::Launch))
     .style(theme::action);
     let edit = button(
         row![icon(Icon::Sliders, WHITE, 21.), bold("编辑实例", 15.)]
@@ -288,6 +297,10 @@ fn stats(app: &Launcher) -> Element<'_, Message> {
 
 fn instances(app: &Launcher) -> Element<'_, Message> {
     let mut list = column![].spacing(6);
+    if app.instances.is_empty() && !app.loading {
+        list = list
+            .push(label("未发现本地游戏，请在设置 → 环境配置中选择游戏目录。", 12.).color(MUTED));
+    }
     for item in &app.instances {
         let active = app.active == item.instance.id;
         let image = match item.icon {
@@ -319,7 +332,7 @@ fn instances(app: &Launcher) -> Element<'_, Message> {
                 } else if item.installed {
                     "已安装"
                 } else {
-                    "未安装"
+                    "缺少 JAR"
                 },
                 active || item.installed
             ),
@@ -429,6 +442,9 @@ fn changelog() -> Element<'static, Message> {
 
 fn queue(app: &Launcher) -> Element<'_, Message> {
     let mut entries = column![].spacing(22);
+    if app.tasks.is_empty() {
+        entries = entries.push(label("暂无下载任务", 12.).color(MUTED));
+    }
     for task in &app.tasks {
         let progress = task.task.progress.percentage.clamp(0., 100.);
         let title = label(task.title.clone(), 11.);
@@ -484,7 +500,7 @@ fn queue(app: &Launcher) -> Element<'_, Message> {
                 Icon::Download,
                 GREEN,
                 format!("下载队列 ({})", app.tasks.len()),
-                Some((
+                (!app.tasks.is_empty()).then_some((
                     if app.tasks.iter().any(|t| !t.paused) {
                         "全部暂停"
                     } else {
@@ -517,7 +533,7 @@ fn featured(app: &Launcher) -> Element<'_, Message> {
             .content_fit(ContentFit::Cover),
         container(
             column![
-                theme::pill("官方更新", false),
+                theme::pill("使用指南", false),
                 bold(FEATURE_TITLES[feature], if compact { 19. } else { 23. }),
                 label(
                     FEATURE_DESCRIPTIONS[feature],
@@ -548,7 +564,7 @@ fn featured(app: &Launcher) -> Element<'_, Message> {
             .content_fit(ContentFit::Cover),
         container(
             column![
-                theme::pill("精选实例", false),
+                theme::pill("功能入口", false),
                 bold(FEATURE_TITLES[next], 15.),
                 label(FEATURE_DESCRIPTIONS[next], 11.).color(WHITE),
                 Space::new().height(Fill),

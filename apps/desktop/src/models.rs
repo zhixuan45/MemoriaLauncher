@@ -1,4 +1,4 @@
-use mc_core::{Instance, LoaderType, Task, TaskStatus};
+use mc_core::{Instance, LoaderType, LocalClient, Task, TaskStatus};
 
 #[derive(Debug, Clone)]
 pub struct InstanceEntry {
@@ -25,21 +25,57 @@ impl From<Instance> for InstanceEntry {
             })
             .unwrap_or("Vanilla")
             .to_owned();
-        let (icon, installed, time, mods, java) = match instance.id.as_str() {
-            "inst-fabric-121" => (0, true, "128 小时", "42 个", "Java 21"),
-            "inst-forge-1192" => (1, false, "0 小时", "18 个", "Java 17"),
-            "inst-modpack-1201" => (2, true, "215 小时", "164 个", "Java 17"),
-            _ => (0, true, "36 小时", "0 个", "Java 21"),
+        let icon = if matches!(
+            instance.loader.as_ref().map(|l| &l.loader_type),
+            Some(LoaderType::Forge | LoaderType::NeoForge)
+        ) {
+            1
+        } else {
+            0
         };
         Self {
             instance,
             loader,
-            java: java.into(),
+            java: "Java 要求未知".into(),
             icon,
-            installed,
-            play_time: time.into(),
-            mods: mods.into(),
+            installed: false,
+            play_time: "未记录".into(),
+            mods: "未统计".into(),
         }
+    }
+}
+
+impl From<LocalClient> for InstanceEntry {
+    fn from(client: LocalClient) -> Self {
+        let mut entry = Self::from(client.instance);
+        entry.installed = client.client_jar_present;
+        entry.java = client
+            .java_major
+            .map(|v| format!("Java {v}"))
+            .unwrap_or_else(|| "Java 要求未知".into());
+        let mods = entry.instance.game_dir.join("mods");
+        entry.mods = match std::fs::read_dir(&mods) {
+            Ok(files) => {
+                let count = files
+                    .map(|file| {
+                        file.and_then(|file| {
+                            Ok(file.file_type()?.is_file()
+                                && file
+                                    .path()
+                                    .extension()
+                                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jar")))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+                match count {
+                    Ok(files) => format!("{} 个", files.into_iter().filter(|v| *v).count()),
+                    Err(_) => "读取失败".into(),
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => "0 个".into(),
+            Err(_) => "读取失败".into(),
+        };
+        entry
     }
 }
 
@@ -72,37 +108,25 @@ impl From<Task> for QueueEntry {
     }
 }
 
-pub const CHANGELOG: [(&str, &str, &[&str]); 3] = [
-    (
-        "v0.1.0",
-        "2024-12-28",
-        &[
-            "全新界面与架构设计",
-            "支持 AI 一键组包（API / MCP）",
-            "优化中文本地化体验",
-        ],
-    ),
-    (
-        "v0.0.9",
-        "2024-12-10",
-        &["优化游戏下载速度", "改进 Mod 管理体验"],
-    ),
-    (
-        "v0.0.8",
-        "2024-11-25",
-        &["修复整合包导入异常问题", "提升启动稳定性"],
-    ),
-];
+pub const CHANGELOG: [(&str, &str, &[&str]); 1] = [(
+    "v0.1.0",
+    "开发中",
+    &[
+        "扫描本地 Minecraft 实例与 Mod 数量",
+        "Microsoft 账户登录、切换与凭据存储",
+        "浏览 Mojang 官方版本清单",
+    ],
+)];
 
 pub const FEATURE_TITLES: [&str; 4] = [
-    "MC 启动器 v0.1.0 正式发布",
-    "RPG 冒险整合包",
-    "探索樱花与山野",
-    "创造你的方块世界",
+    "你的本地 Minecraft 游戏库",
+    "使用 Microsoft 账户登录",
+    "浏览官方游戏版本",
+    "规划你的 AI 需求",
 ];
 pub const FEATURE_DESCRIPTIONS: [&str; 4] = [
-    "全新界面，更强大的 Mod 管理体验，\n支持 AI 一键组包，带来更流畅的游戏体验。",
-    "沉浸式魔幻世界，\n开启全新的冒险旅程。",
-    "发现新的风景，\n让每一次出发都值得期待。",
-    "从一块草地开始，\n探索、创造，更多可能。",
+    "在设置的环境配置中选择游戏目录，\n扫描已安装的版本和加载器。",
+    "点击侧栏底部管理账户，\n游戏启动时验证正版会话。",
+    "游戏下载页读取 Mojang 官方清单，\n安装服务仍在开发中。",
+    "在 AI 页面整理与保留需求，\n执行任务需要接入 AI 服务。",
 ];

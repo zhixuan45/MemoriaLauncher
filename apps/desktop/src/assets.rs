@@ -31,7 +31,7 @@ pub static ART: LazyLock<Assets> = LazyLock::new(|| Assets {
     ],
 });
 
-pub fn picture(handle: &image::Handle, size: f32) -> iced::widget::Image {
+pub fn picture(handle: &image::Handle, size: f32) -> iced::widget::Image<image::Handle> {
     image(handle.clone())
         .width(size)
         .height(size)
@@ -67,7 +67,7 @@ thread_local! {
     static ICONS: RefCell<HashMap<IconKey, svg::Handle>> = RefCell::new(HashMap::new());
 }
 
-pub fn icon(kind: Icon, color: Color, size: f32) -> iced::widget::Svg<'static> {
+pub fn icon(kind: Icon, color: Color, size: f32) -> iced::widget::Svg<'static, iced::Theme> {
     let rgba = color.into_rgba8();
     let handle = ICONS.with(|cache| {
         cache
@@ -84,12 +84,18 @@ fn make_icon(kind: Icon, rgba: [u8; 4]) -> svg::Handle {
         Icon::Home => "M3 11 12 3l9 8M5 10v11h5v-7h4v7h5V10",
         Icon::Download => "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
         Icon::Spark => "m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3ZM21 2v4m-2-2h4",
-        Icon::Settings => "m9 3-1 3-3 1-2 4 2 2v4l3 1 2 3h4l2-3 3-1v-4l2-2-2-4-3-1-1-3ZM12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8",
+        Icon::Settings => {
+            return svg::Handle::from_memory(
+                include_bytes!("../ui/assets/icon_settings.svg").as_slice(),
+            );
+        }
         Icon::Play => "m8 4 12 8-12 8Z",
         Icon::Sliders => "M3 6h18M3 12h18M3 18h18M8 3v6m8 0v6m-7 0v6",
         Icon::Cube => "m12 2 10 5v10l-10 5-10-5V7Zm0 10v10M2 7l10 5L22 7M7 4l10 5",
         Icon::Folder => "M2 7V4h7l3 3h10v14H2Z",
-        Icon::Gamepad => "M7 6h10c4 0 6 14 3 14l-5-5H9l-5 5C1 20 3 6 7 6ZM6 10h6m-3-3v6m7-3h.1m3 3h.1",
+        Icon::Gamepad => {
+            "M7 6h10c4 0 6 14 3 14l-5-5H9l-5 5C1 20 3 6 7 6ZM6 10h6m-3-3v6m7-3h.1m3 3h.1"
+        }
         Icon::Left => "m15 5-7 7 7 7",
         Icon::Right => "m9 5 7 7-7 7",
         Icon::Pause => "M8 5v14m8-14v14",

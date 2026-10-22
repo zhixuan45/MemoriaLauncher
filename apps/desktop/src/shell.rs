@@ -1,9 +1,10 @@
 use crate::app::{Launcher, Message, Modal, Page};
 use crate::assets::{icon, picture, Icon, ART};
 use crate::models::{CHANGELOG, FEATURE_DESCRIPTIONS, FEATURE_TITLES};
+use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, Space};
-use iced::{Alignment, Background, Color, ContentFit, Element, Fill};
+use iced::{Alignment, Background, Color, ContentFit, Fill};
 
 pub fn icon_button(kind: Icon, message: Message) -> Element<'static, Message> {
     button(icon(kind, WHITE, 16.))
@@ -14,12 +15,20 @@ pub fn icon_button(kind: Icon, message: Message) -> Element<'static, Message> {
 }
 
 pub fn view(app: &Launcher) -> Element<'_, Message> {
-    let page = match app.page {
-        Page::Home => app.home(),
-        Page::Settings => crate::settings::view(app),
-        Page::Download => crate::download::view(&app.download).map(Message::Download),
-        Page::Ai => crate::ai::view(&app.ai, app.viewport.width - 194.).map(Message::Ai),
-    };
+    let progress = app.page_motion.value(app.animation_time);
+    // Keep the destination in a stable tree slot so its input/scroll state survives
+    // removal of the outgoing page at the end of the transition.
+    let outgoing = app
+        .outgoing_page
+        .map(|page| crate::motion::fade(page_view(app, page, 1.0), 1.0 - progress, false));
+    let page = stack![
+        crate::motion::fade(
+            page_view(app, app.page, app.card_motion.value(app.animation_time)),
+            progress,
+            true
+        ),
+        outgoing.unwrap_or_else(|| Space::new().into())
+    ];
     let main = stack![
         iced::widget::image(ART.wallpaper.clone())
             .width(Fill)
@@ -34,10 +43,30 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
             ..Default::default()
         })
         .into();
-    if let Some(modal) = app.modal {
-        stack![shell, modal_view(app, modal)].into()
-    } else {
-        shell
+    // Preserve the shell tree (focus and scroll positions) when a modal comes/goes.
+    let overlay = app
+        .modal
+        .map(|modal| modal_view(app, modal))
+        .unwrap_or_else(|| Space::new().into());
+    stack![
+        crate::motion::fade(shell, 1.0, app.modal.is_none()),
+        overlay
+    ]
+    .into()
+}
+
+fn page_view(app: &Launcher, page: Page, cards: f32) -> Element<'_, Message> {
+    match page {
+        Page::Home => crate::home::view(app, cards),
+        Page::Settings => crate::settings::view(app, cards),
+        Page::Download => crate::download::view(&app.download, cards).map(Message::Download),
+        Page::Ai => crate::ai::view(
+            &app.ai,
+            app.viewport.width - 194.,
+            cards,
+            app.animation_time,
+        )
+        .map(Message::Ai),
     }
 }
 
@@ -176,15 +205,8 @@ fn sidebar(app: &Launcher) -> Element<'_, Message> {
                     row![
                         icon(Icon::Gamepad, GREEN, 18.),
                         column![
-                            label(
-                                if app.profile == 0 {
-                                    "Steve_AI"
-                                } else {
-                                    "Alex_Builder"
-                                },
-                                12.
-                            ),
-                            label("离线示例档案", 9.).color(MUTED)
+                            label(app.accounts.name(), 12.),
+                            label(app.accounts.description(), 9.).color(MUTED)
                         ],
                         Space::new().width(Fill),
                         icon(Icon::Right, MUTED, 12.)
@@ -225,7 +247,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 Modal::Instance => "实例信息",
                 Modal::Changelog => "更新日志",
                 Modal::Feature => "精选内容",
-                Modal::Profile => "玩家档案",
+                Modal::Profile => "账户管理",
             },
             22.
         ),
@@ -252,8 +274,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
             }
         }
         Modal::Changelog => {
-            content =
-                content.push(label("以下为设计稿中的示例日志，未连接更新服务。", 12.).color(MUTED));
+            content = content.push(label("当前开发版本已实现的功能。", 12.).color(MUTED));
             for (version, date, lines) in CHANGELOG {
                 content = content.push(bold(format!("{version}    {date}"), 16.));
                 for line in lines {
@@ -271,24 +292,72 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 )
                 .push(bold(FEATURE_TITLES[app.feature], 21.))
                 .push(label(FEATURE_DESCRIPTIONS[app.feature], 14.))
-                .push(label("设计稿内容预览，资源下载与详情链接尚未接入。", 12.).color(MUTED));
+                .push(label("可从侧栏进入对应功能。", 12.).color(MUTED));
         }
         Modal::Profile => {
-            content = content
-                .push(label("当前为离线示例档案；微软登录尚未接入。", 13.).color(MUTED))
-                .push(bold(
-                    if app.profile == 0 {
-                        "Steve_AI"
-                    } else {
-                        "Alex_Builder"
-                    },
-                    25.,
-                ))
-                .push(
-                    button(label("切换示例档案", 14.))
-                        .style(theme::quiet)
-                        .on_press(Message::CycleProfile),
+            content = content.push(label(&app.accounts.notice, 13.).color(MUTED));
+            for account in &app.accounts.index.accounts {
+                let selected = Some(&account.id) == app.accounts.index.active.as_ref();
+                content = content.push(
+                    row![
+                        column![
+                            bold(&account.username, 18.),
+                            label(&account.uuid, 11.).color(MUTED)
+                        ]
+                        .spacing(4)
+                        .width(Fill),
+                        button(label(
+                            if selected {
+                                "当前账户"
+                            } else {
+                                "使用此账户"
+                            },
+                            12.
+                        ))
+                        .on_press_maybe((!app.accounts.busy && !app.launching && !selected).then(
+                            || Message::Accounts(crate::accounts::Message::Select(
+                                account.id.clone()
+                            ))
+                        ))
+                        .style(theme::quiet),
+                        button(label("退出登录", 12.))
+                            .on_press_maybe((!app.accounts.busy && !app.launching).then(|| {
+                                Message::Accounts(crate::accounts::Message::Remove(
+                                    account.id.clone(),
+                                ))
+                            }))
+                            .style(theme::quiet),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
                 );
+            }
+            if app.accounts.index.accounts.is_empty() {
+                content = content.push(label("尚未添加账户", 17.));
+            }
+            content = content.push(
+                button(label(
+                    if app.accounts.busy {
+                        "正在处理账户…"
+                    } else {
+                        "添加 Microsoft 账户"
+                    },
+                    14.,
+                ))
+                .padding(12)
+                .style(theme::action)
+                .on_press_maybe(
+                    (!app.accounts.busy && !app.launching)
+                        .then_some(Message::Accounts(crate::accounts::Message::Login)),
+                ),
+            );
+            if app.accounts.logging_in {
+                content = content.push(
+                    button(label("取消登录", 12.))
+                        .style(theme::quiet)
+                        .on_press(Message::Accounts(crate::accounts::Message::CancelLogin)),
+                );
+            }
         }
     }
     let dialog = container(scrollable(content).direction(theme::scroll_direction()))
@@ -296,18 +365,31 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
         .width(580)
         .max_height(640)
         .style(theme::panel);
-    stack![
+    let progress = app.modal_motion.value(app.animation_time);
+    let interactive = app.modal_motion.target() == 1.0;
+    iced::widget::opaque(stack![
         mouse_area(
             container(Space::new())
                 .width(Fill)
                 .height(Fill)
-                .style(|_| container::Style {
-                    background: Some(Background::Color(Color::from_rgba(0., 0.02, 0.03, 0.78))),
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(Color::from_rgba(
+                        0.,
+                        0.02,
+                        0.03,
+                        0.78 * progress
+                    ))),
                     ..Default::default()
                 })
         )
         .on_press(Message::Dismiss),
-        container(dialog).center_x(Fill).center_y(Fill)
-    ]
+        container(iced::widget::opaque(crate::motion::pop(
+            dialog,
+            progress,
+            interactive
+        )))
+        .center_x(Fill)
+        .center_y(Fill)
+    ])
     .into()
 }

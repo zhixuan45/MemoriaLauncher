@@ -630,11 +630,16 @@ dependencies = [
 name = "desktop"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "iced",
  "iced_test",
  "image",
  "mc-core",
+ "serde",
+ "serde_json",
  "tokio",
+ "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1950,6 +1955,8 @@ dependencies = [
  "chrono",
  "mc-launcher-core",
  "regex",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sha1 0.10.7",

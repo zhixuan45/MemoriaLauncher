@@ -1,9 +1,10 @@
-//! Download navigation and catalogue state; the provider is still a preview source.
+//! Download navigation backed by Mojang's official version catalogue.
 use crate::assets::{icon, picture, Icon, ART};
+use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, WHITE};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text_input, Space};
-use iced::{Alignment, ContentFit, Element, Fill, Length, Task};
-use mc_core::{CatalogProvider, GameVersion, GameVersionType, MockCatalogProvider};
+use iced::{Alignment, ContentFit, Fill, Length, Task};
+use mc_core::{CatalogProvider, GameVersion, GameVersionType, MojangCatalogProvider};
 
 pub const CATEGORIES: [&str; 5] = ["游戏版本", "Mod", "整合包", "资源包", "光影包"];
 const TYPES: [&str; 3] = ["全部版本", "正式版", "快照版"];
@@ -54,7 +55,7 @@ impl Default for State {
             version_type: TYPES[1],
             loader: LOADERS[0],
             sort: SORT[0],
-            notice: "示例目录 · 在线资源检索与安装服务尚未接入".into(),
+            notice: "Mojang 官方版本清单 · 安装服务尚未接入".into(),
         }
     }
 }
@@ -66,7 +67,7 @@ impl State {
         self.loading = true;
         Task::perform(
             async {
-                MockCatalogProvider::new()
+                MojangCatalogProvider
                     .list_game_versions()
                     .await
                     .map_err(|e| e.to_string())
@@ -142,6 +143,10 @@ impl State {
                         self.versions = versions;
                         self.loaded = true;
                         self.reconcile_selection();
+                        self.notice = format!(
+                            "已读取 {} 个官方版本 · 安装服务尚未接入",
+                            self.versions.len()
+                        );
                     }
                     Err(e) => self.notice = format!("读取目录失败：{e}"),
                 }
@@ -168,7 +173,7 @@ fn tab_button<'a>(title: &'a str, active: bool, message: Message) -> Element<'a,
         .into()
 }
 
-pub fn view(state: &State) -> Element<'_, Message> {
+pub fn view(state: &State, cards: f32) -> Element<'_, Message> {
     let mut categories = row![].spacing(8);
     for (i, title) in CATEGORIES.iter().enumerate() {
         let kind = [
@@ -178,7 +183,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             Icon::Edit,
             Icon::Spark,
         ][i];
-        categories = categories.push(
+        categories = categories.push(crate::motion::pop(
             button(
                 row![
                     icon(kind, if state.category == i { GREEN } else { WHITE }, 25.),
@@ -209,7 +214,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 theme::quiet
             })
             .on_press(Message::Category(i)),
-        );
+            cards,
+            true,
+        ));
     }
     let body: Element<'_, Message> = if state.category == 0 {
         let mut list = column![].spacing(6);
@@ -298,34 +305,41 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .width(Length::FillPortion(5))
         .style(theme::panel);
         row![
-            left,
-            container(details(state))
-                .padding(16)
-                .height(Fill)
-                .width(Length::FillPortion(6))
-                .style(theme::panel)
+            crate::motion::pop(left, cards, true),
+            crate::motion::pop(
+                container(details(state))
+                    .padding(16)
+                    .height(Fill)
+                    .width(Length::FillPortion(6))
+                    .style(theme::panel),
+                cards,
+                true
+            )
         ]
         .spacing(12)
         .height(Fill)
         .into()
     } else {
-        container(
-            column![
-                icon(Icon::Download, GREEN, 40.),
-                bold(CATEGORIES[state.category], 24.),
-                label("此资源目录尚未接入，当前可以浏览游戏版本。", 14.).color(MUTED),
-                button(label("浏览游戏版本", 14.))
-                    .on_press(Message::Category(0))
-                    .style(theme::action)
-                    .padding(12)
-            ]
-            .spacing(20),
+        crate::motion::pop(
+            container(
+                column![
+                    icon(Icon::Download, GREEN, 40.),
+                    bold(CATEGORIES[state.category], 24.),
+                    label("此资源目录尚未接入，当前可以浏览游戏版本。", 14.).color(MUTED),
+                    button(label("浏览游戏版本", 14.))
+                        .on_press(Message::Category(0))
+                        .style(theme::action)
+                        .padding(12)
+                ]
+                .spacing(20),
+            )
+            .padding(28)
+            .width(Fill)
+            .height(Fill)
+            .style(theme::panel),
+            cards,
+            true,
         )
-        .padding(28)
-        .width(Fill)
-        .height(Fill)
-        .style(theme::panel)
-        .into()
     };
     container(
         column![
@@ -464,6 +478,7 @@ fn details(state: &State) -> Element<'_, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mc_core::MockCatalogProvider;
     #[tokio::test]
     async fn filters_reconcile_selection_and_empty_results() {
         let mut state = State::default();

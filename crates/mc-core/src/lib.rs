@@ -13,8 +13,12 @@ pub use model::{
     task::{Task, TaskProgress, TaskStatus, TaskType},
 };
 pub use runtime::*;
+/// Install the TLS provider before making catalogue or authentication requests.
+pub fn initialize_runtime() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
 pub use service::{
-    catalog::{CatalogProvider, MockCatalogProvider},
+    catalog::{CatalogProvider, MockCatalogProvider, MojangCatalogProvider},
     instance::{InstanceService, MockInstanceService},
     task::{InMemoryTaskService, TaskService},
 };

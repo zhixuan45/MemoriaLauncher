@@ -22,7 +22,7 @@ pub struct LoginStart {
     pub code_verifier: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AuthAccount {
     pub id: String,
     pub username: String,

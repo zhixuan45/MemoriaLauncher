@@ -1,11 +1,16 @@
+mod accounts;
 mod ai;
 mod app;
 mod assets;
+mod credentials;
 mod download;
 mod home;
 #[cfg(test)]
 mod interaction_tests;
+mod local;
 mod models;
+mod motion;
+mod motion_renderer;
 mod settings;
 mod shell;
 mod theme;
@@ -14,6 +19,7 @@ mod verification;
 use app::Launcher;
 
 fn main() -> iced::Result {
+    mc_core::initialize_runtime();
     let size = verification::window_size();
     let application = iced::application(Launcher::new, Launcher::update, Launcher::view)
         .title("MC 启动器")

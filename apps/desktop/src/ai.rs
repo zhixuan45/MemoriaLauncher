@@ -1,10 +1,13 @@
 //! AI workspace UI. No request is sent until a real provider is connected.
 use crate::assets::{icon, Icon, ART};
+use crate::motion::{self, Toggle};
+use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
 use iced::widget::{
-    button, column, container, pick_list, progress_bar, row, scrollable, text_input, toggler, Space,
+    button, column, container, pick_list, progress_bar, row, scrollable, text_input, Space,
 };
-use iced::{Alignment, Border, Color, ContentFit, Element, Fill, Length};
+use iced::{Alignment, Border, Color, ContentFit, Fill, Length};
+use std::time::Instant;
 
 const VERSIONS: [&str; 4] = ["1.21", "1.20.6", "1.20.1", "1.19.2"];
 const LANGUAGES: [&str; 3] = ["简体中文", "繁體中文", "English"];
@@ -65,7 +68,7 @@ pub struct State {
     batch: usize,
     version: &'static str,
     language: &'static str,
-    web: bool,
+    web: Toggle,
     pub tasks: Vec<TaskPreview>,
     pub notice: String,
 }
@@ -76,57 +79,24 @@ impl Default for State {
             batch: 0,
             version: VERSIONS[0],
             language: LANGUAGES[0],
-            web: true,
-            notice: "示例任务 · AI 服务尚未连接".into(),
-            tasks: vec![
-                TaskPreview {
-                    id: 1,
-                    title: "汉化整合包：All the Mods 9",
-                    detail: "中文语言文件 · 142 / 198",
-                    progress: 72.,
-                    steps: &["分析 Mod 列表", "下载语言文件", "翻译语言文件", "打包输出"],
-                    completed: 2,
-                    paused: false,
-                    tint: PURPLE,
-                },
-                TaskPreview {
-                    id: 2,
-                    title: "下载 Mod：Sodium",
-                    detail: "Sodium 0.5.11",
-                    progress: 56.,
-                    steps: &[],
-                    completed: 0,
-                    paused: false,
-                    tint: GREEN,
-                },
-                TaskPreview {
-                    id: 3,
-                    title: "生成光影配置",
-                    detail: "显卡与游戏设置",
-                    progress: 60.,
-                    steps: &[
-                        "检测硬件配置",
-                        "推荐光影包",
-                        "优化参数",
-                        "生成配置文件",
-                        "完成",
-                    ],
-                    completed: 2,
-                    paused: false,
-                    tint: Color::from_rgb(0.2, 0.7, 0.95),
-                },
-            ],
+            web: Toggle::new(true),
+            notice: "AI 服务尚未连接".into(),
+            tasks: vec![],
         }
     }
 }
 impl State {
-    pub fn update(&mut self, message: Message) {
+    pub fn animating(&self, now: Instant) -> bool {
+        self.web.active(now)
+    }
+
+    pub fn update(&mut self, message: Message, now: Instant) {
         match message {
             Message::Prompt(v) | Message::UsePrompt(v) => self.prompt = v,
             Message::NextPrompts => self.batch = (self.batch + 1) % PROMPTS.len(),
             Message::Version(v) => self.version = v,
             Message::Language(v) => self.language = v,
-            Message::Web(v) => self.web = v,
+            Message::Web(v) => self.web.set(v, now),
             Message::Attach => {
                 self.notice = "整合包 / Mod 文件导入尚未接入，未读取或上传文件。".into()
             }
@@ -146,7 +116,7 @@ impl State {
     }
 }
 
-pub fn view(state: &State, available_width: f32) -> Element<'_, Message> {
+pub fn view(state: &State, available_width: f32, cards: f32, now: Instant) -> Element<'_, Message> {
     let compact = available_width < 1050.;
     let file_options = row![
         button(
@@ -166,11 +136,7 @@ pub fn view(state: &State, available_width: f32) -> Element<'_, Message> {
     .align_y(Alignment::Center);
     let send_options = row![
         Space::new().width(Fill),
-        toggler(state.web)
-            .label("联网搜索")
-            .text_size(11)
-            .size(24)
-            .on_toggle(Message::Web),
+        state.web.labeled_view(now, 24., "联网搜索", Message::Web),
         button(row![icon(Icon::Right, WHITE, 18.), label("发送", 12.)].spacing(6))
             .on_press(Message::Submit)
             .padding(12)
@@ -225,7 +191,7 @@ pub fn view(state: &State, available_width: f32) -> Element<'_, Message> {
     for chunk in PROMPTS[state.batch].chunks(if compact { 2 } else { 4 }) {
         let mut line = row![].spacing(8);
         for prompt in chunk {
-            line = line.push(
+            line = line.push(motion::pop(
                 button(
                     row![icon(Icon::Spark, PURPLE, 17.), label(*prompt, 12.)]
                         .spacing(8)
@@ -236,14 +202,16 @@ pub fn view(state: &State, available_width: f32) -> Element<'_, Message> {
                 .width(Fill)
                 .style(theme::quiet)
                 .on_press(Message::UsePrompt((*prompt).into())),
-            );
+                cards,
+                true,
+            ));
         }
         suggestions = suggestions.push(line);
     }
     let mut examples = column![].spacing(10);
     let mut example_row = row![].spacing(10);
     for (i, (title, description)) in EXAMPLES.iter().enumerate() {
-        example_row = example_row.push(
+        example_row = example_row.push(motion::pop(
             button(
                 column![
                     container(
@@ -280,7 +248,9 @@ pub fn view(state: &State, available_width: f32) -> Element<'_, Message> {
                 "请帮我制作{}，目标版本 {}，输出语言 {}。",
                 title, state.version, state.language
             ))),
-        );
+            cards,
+            true,
+        ));
         if (i + 1) % (if compact { 2 } else { 4 }) == 0 {
             examples = examples.push(example_row);
             example_row = row![].spacing(10);
@@ -298,7 +268,7 @@ pub fn view(state: &State, available_width: f32) -> Element<'_, Message> {
         .spacing(16)
         .align_y(Alignment::Center),
         Space::new().height(12),
-        composer,
+        motion::pop(composer, cards, true),
         label(&state.notice, 11.).color(MUTED),
         suggestions,
         container(column![bold("实用示例", 15.), examples].spacing(12))
@@ -313,11 +283,15 @@ pub fn view(state: &State, available_width: f32) -> Element<'_, Message> {
                 .direction(theme::scroll_direction())
                 .width(Length::FillPortion(3))
                 .height(Fill),
-            container(task_panel(state))
-                .width(panel_width)
-                .height(Fill)
-                .padding(14)
-                .style(theme::panel)
+            motion::pop(
+                container(task_panel(state))
+                    .width(panel_width)
+                    .height(Fill)
+                    .padding(14)
+                    .style(theme::panel),
+                cards,
+                true
+            )
         ]
         .spacing(16)
         .height(Fill),
@@ -368,7 +342,7 @@ fn task_panel(state: &State) -> Element<'_, Message> {
                     bold(task.title, 13.),
                     label(
                         if task.paused {
-                            "已暂停（示例）"
+                            "已暂停"
                         } else {
                             task.detail
                         },
@@ -420,7 +394,7 @@ fn task_panel(state: &State) -> Element<'_, Message> {
             bold(format!("任务列表 ({})", state.tasks.len()), 17.)
         ]
         .spacing(10),
-        label("示例预览", 10.).color(MUTED),
+        label(&state.notice, 10.).color(MUTED),
         scrollable(tasks)
             .direction(theme::scroll_direction())
             .height(Fill)
@@ -434,14 +408,15 @@ fn task_panel(state: &State) -> Element<'_, Message> {
 mod tests {
     use super::*;
     #[test]
-    fn submission_never_fabricates_work_and_task_ids_are_stable() {
+    fn submission_without_a_provider_keeps_the_queue_empty() {
         let mut state = State::default();
-        state.update(Message::Prompt("汉化整合包".into()));
-        state.update(Message::Submit);
-        assert_eq!(state.tasks.len(), 3);
+        let now = Instant::now();
+        state.update(Message::Prompt("汉化整合包".into()), now);
+        state.update(Message::Submit, now);
+        assert!(state.tasks.is_empty());
         assert_eq!(state.prompt, "汉化整合包");
-        state.update(Message::Remove(1));
-        state.update(Message::Pause(3));
-        assert!(state.tasks.iter().find(|t| t.id == 3).unwrap().paused);
+        state.update(Message::Remove(1), now);
+        state.update(Message::Pause(3), now);
+        assert!(state.tasks.is_empty());
     }
 }

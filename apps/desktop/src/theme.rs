@@ -1,6 +1,7 @@
 use crate::app::Message;
+use crate::motion_renderer::Element;
 use iced::widget::{button, container, text};
-use iced::{border, Background, Border, Color, Element, Font, Theme};
+use iced::{border, Background, Border, Color, Font, Theme};
 
 pub const GREEN: Color = Color::from_rgb(0., 0.91, 0.67);
 pub const WHITE: Color = Color::from_rgb(0.90, 0.94, 0.97);
@@ -13,7 +14,7 @@ pub const FONT: Font = Font::with_name("Microsoft YaHei");
 pub fn label<'a>(
     value: impl iced::widget::text::IntoFragment<'a>,
     size: f32,
-) -> iced::widget::Text<'a> {
+) -> iced::widget::Text<'a, iced::Theme, crate::motion_renderer::Renderer> {
     text(value)
         .size(size)
         .color(WHITE)
@@ -23,7 +24,7 @@ pub fn label<'a>(
 pub fn bold<'a>(
     value: impl iced::widget::text::IntoFragment<'a>,
     size: f32,
-) -> iced::widget::Text<'a> {
+) -> iced::widget::Text<'a, iced::Theme, crate::motion_renderer::Renderer> {
     label(value, size).font(Font {
         weight: iced::font::Weight::Bold,
         ..FONT

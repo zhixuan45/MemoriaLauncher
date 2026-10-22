@@ -1,10 +1,11 @@
+use crate::motion::{self, Tween};
+use crate::motion_renderer::Element;
 use crate::{
-    home,
     models::{InstanceEntry, QueueEntry},
     shell, verification,
 };
-use iced::{event, mouse, window, Element, Event, Point, Subscription, Task, Vector};
-use mc_core::{InMemoryTaskService, InstanceService, MockInstanceService, TaskService};
+use iced::{event, mouse, window, Event, Point, Subscription, Task, Vector};
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -78,7 +79,15 @@ pub struct Drag {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Loaded(Result<(Vec<InstanceEntry>, Vec<QueueEntry>), String>),
+    Animate(Instant),
+    Loaded(Result<crate::local::LocalData, String>),
+    Accounts(crate::accounts::Message),
+    GameRoot(String),
+    JavaPath(String),
+    SaveEnvironment,
+    EnvironmentSaved(Result<crate::local::Environment, String>),
+    GameStarted(String),
+    GameFinished(Result<String, String>),
     Navigate(Page),
     SelectInstance(String),
     MoveInstance(String, i32),
@@ -101,7 +110,6 @@ pub enum Message {
     Maximize,
     Close,
     Profile,
-    CycleProfile,
     Settings(crate::settings::Message),
     Download(crate::download::Message),
     Ai(crate::ai::Message),
@@ -124,14 +132,24 @@ pub struct Launcher {
     pub viewport: iced::Size,
     pub drag: Option<Drag>,
     pub modal: Option<Modal>,
-    pub profile: usize,
+    pub outgoing_page: Option<Page>,
+    pub page_motion: Tween,
+    pub card_motion: Tween,
+    pub modal_motion: Tween,
+    pub animation_time: Instant,
+    pub accounts: crate::accounts::State,
+    pub environment: crate::local::Environment,
+    pub game_root_input: String,
+    pub java_input: String,
+    pub environment_saving: bool,
+    pub launching: bool,
     pub settings: crate::settings::State,
     pub download: crate::download::State,
     pub ai: crate::ai::State,
     pub verification: verification::Verification,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Modal {
     Instance,
     Changelog,
@@ -141,12 +159,18 @@ pub enum Modal {
 
 impl Launcher {
     pub fn new() -> (Self, Task<Message>) {
+        let (environment, environment_error) = crate::local::Environment::load();
+        let now = Instant::now();
+        let mut page_motion = Tween::new(0.0, now);
+        page_motion.to(1.0, motion::PAGE_DURATION, now);
+        let mut card_motion = Tween::new(0.0, now);
+        card_motion.to(1.0, motion::CARD_DURATION, now);
         let state = Self {
             page: Page::Home,
             instances: vec![],
             tasks: vec![],
             active: String::new(),
-            status: "正在读取实例与任务…".into(),
+            status: environment_error.unwrap_or_else(|| "正在读取本地实例…".into()),
             loading: true,
             feature: 0,
             edit_layout: false,
@@ -155,43 +179,29 @@ impl Launcher {
             viewport: verification::window_size(),
             drag: None,
             modal: None,
-            profile: 0,
+            outgoing_page: None,
+            page_motion,
+            card_motion,
+            modal_motion: Tween::new(0.0, now),
+            animation_time: now,
+            accounts: crate::accounts::State::default(),
+            game_root_input: environment.game_root.to_string_lossy().into_owned(),
+            java_input: environment.java.to_string_lossy().into_owned(),
+            environment,
+            environment_saving: false,
+            launching: false,
             settings: crate::settings::State::default(),
             download: crate::download::State::default(),
             ai: crate::ai::State::default(),
             verification: verification::Verification::from_args(),
         };
-        (state, Self::load())
+        let task = Task::batch([state.load(), state.accounts.load().map(Message::Accounts)]);
+        (state, task)
     }
 
-    fn load() -> Task<Message> {
+    fn load(&self) -> Task<Message> {
         Task::perform(
-            async {
-                let instances = MockInstanceService::new().with_sample_data().await;
-                let tasks = InMemoryTaskService::new().with_sample_data().await;
-                let mut instances = instances
-                    .list_instances()
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let order = [
-                    "inst-fabric-121",
-                    "inst-vanilla-121",
-                    "inst-forge-1192",
-                    "inst-modpack-1201",
-                ];
-                instances.sort_by_key(|i| {
-                    order
-                        .iter()
-                        .position(|id| *id == i.id)
-                        .unwrap_or(usize::MAX)
-                });
-                let mut tasks = tasks.list_tasks().await.map_err(|e| e.to_string())?;
-                tasks.sort_by(|a, b| a.id.cmp(&b.id));
-                Ok((
-                    instances.into_iter().map(Into::into).collect(),
-                    tasks.into_iter().map(Into::into).collect(),
-                ))
-            },
+            crate::local::scan(self.environment.game_root.clone()),
             Message::Loaded,
         )
     }
@@ -202,10 +212,21 @@ impl Launcher {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Animate(now) => {
+                let now = now.max(self.animation_time);
+                self.animation_time = now;
+                if !self.page_motion.active(now) {
+                    self.outgoing_page = None;
+                }
+                if self.modal_motion.target() == 0.0 && !self.modal_motion.active(now) {
+                    self.modal = None;
+                }
+            }
             Message::Loaded(result) => {
                 self.loading = false;
                 match result {
-                    Ok((instances, tasks)) => {
+                    Ok(data) => {
+                        let instances = data.instances;
                         if !instances.iter().any(|i| i.instance.id == self.active) {
                             self.active = instances
                                 .first()
@@ -213,8 +234,7 @@ impl Launcher {
                                 .unwrap_or_default();
                         }
                         self.instances = instances;
-                        self.tasks = tasks;
-                        self.status = "界面预览 · 实例与任务使用示例数据".into();
+                        self.status = data.notice;
                     }
                     Err(e) => self.status = format!("读取失败：{e}"),
                 }
@@ -223,8 +243,17 @@ impl Launcher {
                 }
             }
             Message::Navigate(page) => {
+                if self.page != page {
+                    let now = Instant::now().max(self.animation_time);
+                    self.animation_time = now;
+                    self.outgoing_page = Some(self.page);
+                    self.page_motion = Tween::new(0.0, now);
+                    self.page_motion.to(1.0, motion::PAGE_DURATION, now);
+                    self.card_motion = Tween::new(0.0, now);
+                    self.card_motion.to(1.0, motion::CARD_DURATION, now);
+                }
                 self.page = page;
-                self.modal = None;
+                self.dismiss_modal();
                 self.drag = None;
                 self.edit_layout = false;
                 if page == Page::Download {
@@ -244,44 +273,108 @@ impl Launcher {
                 }
             }
             Message::Launch => {
-                self.status = match self.current() {
-                    Some(i) if !i.installed => "此示例实例尚未安装，请先安装游戏。".into(),
-                    Some(i) => format!(
-                        "{}：当前是示例实例，尚未连接本地启动与账户认证。",
-                        i.instance.name
-                    ),
-                    None => "暂无可启动的实例。".into(),
+                if self.launching || self.loading || self.environment_saving {
+                    return Task::none();
+                }
+                let key = match self.current() {
+                    Some(i) if !i.installed => {
+                        self.status = "客户端 JAR 缺失，请先安装完整游戏。".into();
+                        return Task::none();
+                    }
+                    Some(i) => i.instance.id.clone(),
+                    None => {
+                        self.status = "暂无可启动的实例，请在环境配置中检查游戏目录。".into();
+                        return Task::none();
+                    }
                 };
+                if self.accounts.busy {
+                    self.status = "请等待账户操作完成。".into();
+                    return Task::none();
+                }
+                let Some(account) = self.accounts.index.current() else {
+                    self.status = "请先登录 Microsoft 账户。".into();
+                    self.open_modal(Modal::Profile);
+                    return Task::none();
+                };
+                let provider = match &self.accounts.provider {
+                    Ok(provider) => provider.clone(),
+                    Err(e) => {
+                        self.status = e.clone();
+                        self.open_modal(Modal::Profile);
+                        return Task::none();
+                    }
+                };
+                self.launching = true;
+                self.status = "正在验证账户、Java 和游戏依赖…".into();
+                return crate::local::launch(
+                    self.environment.clone(),
+                    key,
+                    account.id.clone(),
+                    provider,
+                );
             }
-            Message::EditInstance => self.modal = Some(Modal::Instance),
-            Message::Dismiss => self.modal = None,
+            Message::GameStarted(status) => self.status = status,
+            Message::GameFinished(result) => {
+                self.launching = false;
+                self.status = result.unwrap_or_else(|e| format!("游戏启动或运行失败：{e}"));
+            }
+            Message::Accounts(message) => {
+                if self.launching {
+                    return Task::none();
+                }
+                return self.accounts.update(message).map(Message::Accounts);
+            }
+            Message::GameRoot(value) => self.game_root_input = value,
+            Message::JavaPath(value) => self.java_input = value,
+            Message::SaveEnvironment => {
+                if self.loading || self.environment_saving || self.launching {
+                    return Task::none();
+                }
+                if self.game_root_input.trim().is_empty() || self.java_input.trim().is_empty() {
+                    self.status = "游戏目录和 Java 路径不能为空。".into();
+                    return Task::none();
+                }
+                let config = crate::local::Environment {
+                    game_root: self.game_root_input.trim().into(),
+                    java: self.java_input.trim().into(),
+                };
+                self.environment_saving = true;
+                return Task::perform(
+                    async move { config.save().await.map(|_| config) },
+                    Message::EnvironmentSaved,
+                );
+            }
+            Message::EnvironmentSaved(result) => {
+                self.environment_saving = false;
+                match result {
+                    Ok(config) => {
+                        self.environment = config;
+                        self.loading = true;
+                        return self.load();
+                    }
+                    Err(e) => self.status = format!("保存环境配置失败：{e}"),
+                }
+            }
+            Message::EditInstance => self.open_modal(Modal::Instance),
+            Message::Dismiss => self.dismiss_modal(),
             Message::Refresh => {
-                if !self.loading {
+                if !self.loading && !self.environment_saving && !self.launching {
                     self.loading = true;
-                    return Self::load();
+                    return self.load();
                 }
             }
             Message::ToggleTask(id) => {
-                if let Some(task) = self.tasks.iter_mut().find(|t| t.task.id == id) {
-                    task.paused = !task.paused;
-                }
-                self.status = "已切换示例队列状态；真实下载服务尚未接入。".into();
+                let _ = id;
+                self.status = "下载服务尚未接入，无法暂停或恢复任务。".into();
             }
             Message::ToggleAllTasks => {
-                let pause = self.tasks.iter().any(|t| !t.paused);
-                self.tasks.iter_mut().for_each(|t| t.paused = pause);
-                self.status = if pause {
-                    "已暂停全部示例任务"
-                } else {
-                    "已恢复全部示例任务"
-                }
-                .into();
+                self.status = "下载服务尚未接入，暂无可操作的下载任务。".into();
             }
             Message::Feature(delta) => {
                 self.feature = (self.feature as i32 + delta).rem_euclid(4) as usize
             }
-            Message::FeatureDetails => self.modal = Some(Modal::Feature),
-            Message::Changelogs => self.modal = Some(Modal::Changelog),
+            Message::FeatureDetails => self.open_modal(Modal::Feature),
+            Message::Changelogs => self.open_modal(Modal::Changelog),
             Message::ToggleLayout => {
                 self.edit_layout = !self.edit_layout;
                 self.drag = None;
@@ -334,7 +427,7 @@ impl Launcher {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
             })) => {
-                self.modal = None;
+                self.dismiss_modal();
                 self.drag = None;
                 self.edit_layout = false;
             }
@@ -343,13 +436,18 @@ impl Launcher {
             Message::Minimize => return window::latest().and_then(|id| window::minimize(id, true)),
             Message::Maximize => return window::latest().and_then(window::toggle_maximize),
             Message::Close => return iced::exit(),
-            Message::Profile => self.modal = Some(Modal::Profile),
-            Message::CycleProfile => self.profile = (self.profile + 1) % 2,
-            Message::Settings(message) => self.settings.update(message),
+            Message::Profile => self.open_modal(Modal::Profile),
+            Message::Settings(message) => {
+                self.animation_time = Instant::now().max(self.animation_time);
+                self.settings.update(message, self.animation_time);
+            }
             Message::Download(message) => {
                 return self.download.update(message).map(Message::Download)
             }
-            Message::Ai(message) => self.ai.update(message),
+            Message::Ai(message) => {
+                self.animation_time = Instant::now().max(self.animation_time);
+                self.ai.update(message, self.animation_time);
+            }
             Message::Capture => {
                 return window::latest()
                     .and_then(window::screenshot)
@@ -363,18 +461,49 @@ impl Launcher {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let window = event::listen_with(window_event);
+        let mut subscriptions = vec![window];
         if self.edit_layout && self.page == Page::Home && self.modal.is_none() {
-            Subscription::batch([window, event::listen_with(layout_event)])
-        } else {
-            window
+            subscriptions.push(event::listen_with(layout_event));
+        }
+        if self.animating() {
+            subscriptions.push(
+                iced::time::every(std::time::Duration::from_millis(16)).map(Message::Animate),
+            );
+        }
+        Subscription::batch(subscriptions)
+    }
+
+    pub fn animating(&self) -> bool {
+        self.page_motion.active(self.animation_time)
+            || self.card_motion.active(self.animation_time)
+            || self.modal_motion.active(self.animation_time)
+            || self.settings.animating(self.animation_time)
+            || self.ai.animating(self.animation_time)
+    }
+
+    fn open_modal(&mut self, modal: Modal) {
+        let now = Instant::now().max(self.animation_time);
+        self.animation_time = now;
+        if self.modal != Some(modal) {
+            self.modal_motion = Tween::new(0.0, now);
+        }
+        self.modal = Some(modal);
+        self.modal_motion.to(1.0, motion::OPEN_DURATION, now);
+    }
+
+    fn dismiss_modal(&mut self) {
+        if self.modal.is_some() {
+            let now = Instant::now().max(self.animation_time);
+            self.animation_time = now;
+            self.modal_motion.to(0.0, motion::CLOSE_DURATION, now);
+            if !self.modal_motion.active(now) {
+                self.modal = None;
+            }
         }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
         shell::view(self)
-    }
-    pub fn home(&self) -> Element<'_, Message> {
-        home::view(self)
     }
 }
 

@@ -24,6 +24,106 @@ pub trait CatalogProvider: Send + Sync {
     ) -> LauncherResult<Vec<ModProject>>;
 }
 
+/// Official catalogue. Never substitutes example data when the request fails.
+pub struct MojangCatalogProvider;
+
+#[derive(serde::Deserialize)]
+struct Manifest {
+    versions: Vec<ManifestVersion>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestVersion {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    release_time: chrono::DateTime<Utc>,
+    url: String,
+}
+
+fn manifest_versions(manifest: Manifest) -> Vec<GameVersion> {
+    manifest
+        .versions
+        .into_iter()
+        .filter_map(|entry| {
+            let version_type = match entry.kind.as_str() {
+                "release" => GameVersionType::Release,
+                "snapshot" => GameVersionType::Snapshot,
+                _ => return None,
+            };
+            Some(GameVersion {
+                title: format!("Minecraft {}", entry.id),
+                summary: format!("Mojang 官方版本清单：{}（{}）", entry.id, entry.kind),
+                id: entry.id,
+                version_type,
+                release_date: entry.release_time.format("%Y-%m-%d").to_string(),
+                release_time: entry.release_time,
+                java_version: "Java 要求待查询".into(),
+                supported_loaders: vec!["原版".into()],
+                highlights: vec![],
+                version_files: vec![format!("官方版本元数据：{}", entry.url)],
+                system_requirements: vec!["官方清单未提供配置要求，请查阅该版本元数据。".into()],
+                related_resources: vec![],
+                changelog_url: String::new(),
+                url: entry.url,
+            })
+        })
+        .collect()
+}
+
+#[async_trait]
+impl CatalogProvider for MojangCatalogProvider {
+    async fn list_game_versions(&self) -> LauncherResult<Vec<GameVersion>> {
+        crate::initialize_runtime();
+        let client = reqwest::Client::builder()
+            .user_agent(concat!("MemoriaLauncher/", env!("CARGO_PKG_VERSION")))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| crate::LauncherError::Internal(e.to_string()))?;
+        let manifest = client
+            .get("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json")
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| crate::LauncherError::Internal(format!("读取 Mojang 清单失败：{e}")))?
+            .json::<Manifest>()
+            .await
+            .map_err(|e| crate::LauncherError::InvalidMetadata(e.to_string()))?;
+        Ok(manifest_versions(manifest))
+    }
+
+    async fn search_mods(&self, _: &str, _: Option<&str>) -> LauncherResult<Vec<ModProject>> {
+        Err(crate::LauncherError::Unsupported("Mod 目录尚未接入".into()))
+    }
+}
+
+#[cfg(test)]
+mod official_tests {
+    use super::*;
+
+    #[test]
+    fn official_manifest_preserves_source_metadata_without_inventing_loader_support() {
+        let manifest = serde_json::from_str(r#"{"versions":[{"id":"test-release","type":"release","releaseTime":"2026-10-20T12:00:00Z","url":"https://example.test/release.json"},{"id":"test-snapshot","type":"snapshot","releaseTime":"2026-10-21T12:00:00Z","url":"https://example.test/snapshot.json"},{"id":"classic","type":"old_alpha","releaseTime":"2010-01-01T00:00:00Z","url":"https://example.test/old.json"}]}"#).unwrap();
+        let versions = manifest_versions(manifest);
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].id, "test-release");
+        assert_eq!(versions[0].release_date, "2026-10-20");
+        assert_eq!(versions[0].url, "https://example.test/release.json");
+        assert_eq!(versions[0].supported_loaders, ["原版"]);
+        assert!(versions[0].highlights.is_empty());
+        assert_eq!(versions[1].version_type, GameVersionType::Snapshot);
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires live access to Mojang"]
+    async fn official_catalog_is_reachable() {
+        let versions = MojangCatalogProvider.list_game_versions().await.unwrap();
+        assert!(!versions.is_empty());
+        assert!(versions.iter().all(|v| v.url.starts_with("https://")));
+    }
+}
+
 /// 模拟版本与模组目录提供者（提供完整结构化模拟版本数据，后续可直接替换为 MojangPistonCatalogProvider）
 #[derive(Default, Clone)]
 pub struct MockCatalogProvider;

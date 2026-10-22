@@ -1,10 +1,11 @@
 use crate::app::{Launcher, Message as AppMessage};
 use crate::assets::{icon, Icon};
+use crate::motion::{self, Toggle};
+use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
-use iced::widget::{
-    button, column, container, pick_list, row, scrollable, text_input, toggler, Space,
-};
-use iced::{Alignment, Color, Element, Fill, Length};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text_input, Space};
+use iced::{Alignment, Color, Fill, Length};
+use std::time::Instant;
 
 const TABS: [&str; 7] = [
     "常规",
@@ -38,7 +39,7 @@ pub enum Message {
 pub struct State {
     tab: usize,
     query: String,
-    switches: [bool; 5],
+    switches: [Toggle; 5],
     language: &'static str,
     region: &'static str,
     date: &'static str,
@@ -50,7 +51,7 @@ impl Default for State {
         Self {
             tab: 0,
             query: String::new(),
-            switches: [false, true, true, false, false],
+            switches: [false, true, true, false, false].map(Toggle::new),
             language: LANGUAGES[0],
             region: REGIONS[0],
             date: DATES[0],
@@ -60,7 +61,11 @@ impl Default for State {
 }
 
 impl State {
-    pub fn update(&mut self, message: Message) {
+    pub fn animating(&self, now: Instant) -> bool {
+        self.switches.iter().any(|toggle| toggle.active(now))
+    }
+
+    pub fn update(&mut self, message: Message, now: Instant) {
         match message {
             Message::Tab(tab) => {
                 self.tab = tab.min(TABS.len() - 1);
@@ -69,13 +74,24 @@ impl State {
             Message::Search(query) => self.query = query,
             Message::Toggle(index, value) => {
                 if let Some(setting) = self.switches.get_mut(index) {
-                    *setting = value;
+                    setting.set(value, now);
                 }
             }
             Message::Language(value) => self.language = value,
             Message::Region(value) => self.region = value,
             Message::Date(value) => self.date = value,
-            Message::Reset => *self = Self::default(),
+            Message::Reset => {
+                for (toggle, value) in self
+                    .switches
+                    .iter_mut()
+                    .zip([false, true, true, false, false])
+                {
+                    toggle.set(value, now);
+                }
+                let mut defaults = Self::default();
+                std::mem::swap(&mut defaults.switches, &mut self.switches);
+                *self = defaults;
+            }
             Message::Notice(value) => self.notice = value,
         }
     }
@@ -87,7 +103,7 @@ fn dispatch(message: Message) -> AppMessage {
 
 // Both rows allocate their card heights once. Account content scrolls inside its
 // cell and cannot push its bottom edge into the quick-actions row.
-pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
+pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
     let state = &app.settings;
     let mut tabs = row![].spacing(4);
     for (index, title) in TABS.iter().enumerate() {
@@ -134,12 +150,15 @@ pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
         if !found {
             results = results.push(label("没有匹配的设置项", 14.).color(MUTED));
         }
-        container(scrollable(results).direction(theme::scroll_direction()))
-            .padding(20)
-            .width(Fill)
-            .height(Fill)
-            .style(theme::panel)
-            .into()
+        motion::pop(
+            container(scrollable(results).direction(theme::scroll_direction()))
+                .padding(20)
+                .width(Fill)
+                .height(Fill)
+                .style(theme::panel),
+            cards,
+            true,
+        )
     } else if state.tab == 0 {
         let top_height = if app.viewport.height < 740. {
             278.
@@ -148,21 +167,27 @@ pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
         };
         column![
             row![
-                panel(Icon::Play, GREEN, "启动器行为", behavior(state)).width(Fill),
+                panel(
+                    Icon::Play,
+                    GREEN,
+                    "启动器行为",
+                    behavior(state, app.animation_time),
+                    cards
+                ),
                 panel(
                     Icon::Info,
                     Color::from_rgb(0.2, 0.75, 1.),
                     "语言与地区",
-                    locale(state)
-                )
-                .width(Fill),
+                    locale(state),
+                    cards
+                ),
                 panel(
                     Icon::Gamepad,
                     Color::from_rgb(0.2, 0.75, 1.),
                     "账户与数据",
-                    account(app)
-                )
-                .width(Fill),
+                    account(app),
+                    cards
+                ),
             ]
             .spacing(12)
             .height(top_height),
@@ -171,16 +196,16 @@ pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
                     Icon::Download,
                     Color::from_rgb(0.2, 0.75, 1.),
                     "启动器更新",
-                    updates(state)
-                )
-                .width(Fill),
+                    updates(state, app.animation_time),
+                    cards
+                ),
                 panel(
                     Icon::Spark,
                     Color::from_rgb(1., 0.8, 0.2),
                     "快捷操作",
-                    quick_actions()
-                )
-                .width(Fill),
+                    quick_actions(),
+                    cards
+                ),
             ]
             .spacing(12)
             .height(Length::Fill),
@@ -188,37 +213,71 @@ pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
         .spacing(12)
         .height(Fill)
         .into()
-    } else {
-        container(
-            column![
-                icon(Icon::Settings, PURPLE, 36.),
-                bold(TABS[state.tab], 24.),
-                label(
-                    [
-                        "",
-                        "内存分配、分辨率与游戏启动参数",
-                        "下载源、并行任务与安装路径",
-                        "Java 运行环境与路径检测",
-                        "模型提供商、API 连接与 MCP",
-                        "壁纸、主题与界面缩放",
-                        "日志、诊断与实验功能"
-                    ][state.tab],
-                    14.
-                )
-                .color(MUTED),
-                label("此模块的配置服务尚未接入。", 12.).color(MUTED),
-                button(label("返回常规设置", 13.))
-                    .on_press(dispatch(Message::Tab(0)))
-                    .style(theme::action)
-                    .padding(12),
-            ]
-            .spacing(16),
+    } else if state.tab == 3 {
+        motion::pop(
+            container(
+                column![
+                    bold("游戏与 Java 环境", 24.),
+                    label("游戏根目录（包含 versions、libraries、assets）", 13.).color(MUTED),
+                    text_input("游戏根目录", &app.game_root_input)
+                        .on_input(AppMessage::GameRoot)
+                        .padding(12),
+                    label("Java 可执行文件路径，或 PATH 中的 java", 13.).color(MUTED),
+                    text_input("java", &app.java_input)
+                        .on_input(AppMessage::JavaPath)
+                        .padding(12),
+                    button(label("保存并重新扫描", 14.))
+                        .padding(12)
+                        .style(theme::action)
+                        .on_press_maybe(
+                            (!app.loading && !app.environment_saving && !app.launching)
+                                .then_some(AppMessage::SaveEnvironment)
+                        ),
+                    label(&app.status, 12.).color(MUTED),
+                ]
+                .spacing(16),
+            )
+            .padding(24)
+            .width(Fill)
+            .height(Fill)
+            .style(theme::panel),
+            cards,
+            true,
         )
-        .padding(28)
-        .width(Fill)
-        .height(Fill)
-        .style(theme::panel)
-        .into()
+    } else {
+        motion::pop(
+            container(
+                column![
+                    icon(Icon::Settings, PURPLE, 36.),
+                    bold(TABS[state.tab], 24.),
+                    label(
+                        [
+                            "",
+                            "内存分配、分辨率与游戏启动参数",
+                            "下载源、并行任务与安装路径",
+                            "Java 运行环境与路径检测",
+                            "模型提供商、API 连接与 MCP",
+                            "壁纸、主题与界面缩放",
+                            "日志、诊断与实验功能"
+                        ][state.tab],
+                        14.
+                    )
+                    .color(MUTED),
+                    label("此模块的配置服务尚未接入。", 12.).color(MUTED),
+                    button(label("返回常规设置", 13.))
+                        .on_press(dispatch(Message::Tab(0)))
+                        .style(theme::action)
+                        .padding(12),
+                ]
+                .spacing(16),
+            )
+            .padding(28)
+            .width(Fill)
+            .height(Fill)
+            .style(theme::panel),
+            cards,
+            true,
+        )
     };
     container(
         column![
@@ -252,24 +311,30 @@ fn panel<'a>(
     tint: Color,
     title: &'static str,
     content: Element<'a, AppMessage>,
-) -> iced::widget::Container<'a, AppMessage> {
-    container(
-        column![
-            row![icon(kind, tint, 20.), bold(title, 15.)]
-                .spacing(10)
-                .align_y(Alignment::Center),
-            scrollable(content)
-                .direction(theme::scroll_direction())
-                .height(Fill),
-        ]
-        .spacing(14),
+    cards: f32,
+) -> Element<'a, AppMessage> {
+    motion::pop(
+        container(
+            column![
+                row![icon(kind, tint, 20.), bold(title, 15.)]
+                    .spacing(10)
+                    .align_y(Alignment::Center),
+                scrollable(content)
+                    .direction(theme::scroll_direction())
+                    .height(Fill),
+            ]
+            .spacing(14),
+        )
+        .padding(14)
+        .height(Fill)
+        .width(Fill)
+        .style(theme::panel),
+        cards,
+        true,
     )
-    .padding(14)
-    .height(Fill)
-    .style(theme::panel)
 }
 
-fn behavior(state: &State) -> Element<'_, AppMessage> {
+fn behavior(state: &State, now: Instant) -> Element<'_, AppMessage> {
     let titles = [
         ("开机自动启动", "随系统启动时自动运行启动器"),
         ("启动后最小化到托盘", "启动器启动后自动最小化到托盘"),
@@ -284,9 +349,9 @@ fn behavior(state: &State) -> Element<'_, AppMessage> {
                 column![bold(title, 12.), label(detail, 9.).color(MUTED)]
                     .spacing(4)
                     .width(Fill),
-                toggler(state.switches[index])
-                    .size(26)
-                    .on_toggle(move |value| dispatch(Message::Toggle(index, value))),
+                state.switches[index].view(now, 26., move |value| dispatch(Message::Toggle(
+                    index, value
+                ))),
             ]
             .spacing(10)
             .align_y(Alignment::Center),
@@ -325,22 +390,15 @@ fn account(app: &Launcher) -> Element<'_, AppMessage> {
         row![
             icon(Icon::Gamepad, GREEN, 30.),
             column![
-                bold(
-                    if app.profile == 0 {
-                        "Steve_AI"
-                    } else {
-                        "Alex_Builder"
-                    },
-                    13.
-                ),
-                label("离线示例档案", 9.).color(MUTED),
+                bold(app.accounts.name(), 13.),
+                label(app.accounts.description(), 9.).color(MUTED),
             ]
             .spacing(4)
             .width(Fill),
             button(label("更换账户", 10.))
                 .padding(7)
                 .style(theme::quiet)
-                .on_press(AppMessage::CycleProfile),
+                .on_press(AppMessage::Profile),
         ]
         .spacing(8)
         .align_y(Alignment::Center),
@@ -371,7 +429,7 @@ fn account(app: &Launcher) -> Element<'_, AppMessage> {
     .into()
 }
 
-fn updates(state: &State) -> Element<'_, AppMessage> {
+fn updates(state: &State, now: Instant) -> Element<'_, AppMessage> {
     column![
         row![
             label("当前版本   v0.1.0", 12.),
@@ -393,9 +451,7 @@ fn updates(state: &State) -> Element<'_, AppMessage> {
             ]
             .spacing(4)
             .width(Fill),
-            toggler(state.switches[4])
-                .size(26)
-                .on_toggle(|v| dispatch(Message::Toggle(4, v))),
+            state.switches[4].view(now, 26., |v| dispatch(Message::Toggle(4, v))),
         ]
         .spacing(10)
         .align_y(Alignment::Center),
