@@ -635,6 +635,7 @@ dependencies = [
  "iced_test",
  "image",
  "mc-core",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -1992,6 +1993,15 @@ dependencies = [
  "winver",
  "xz2",
  "zip 2.6.1",
+]
+
+[[package]]
+name = "mc-mcp"
+version = "0.1.0"
+dependencies = [
+ "mc-core",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

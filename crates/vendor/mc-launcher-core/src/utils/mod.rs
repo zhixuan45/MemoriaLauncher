@@ -215,6 +215,7 @@ pub fn is_version_valid(version: &str, minecraft_directory: impl AsRef<Path>) ->
 }
 
 pub fn get_minecraft_news(options: MinecraftNewsOptions) -> Result<Articles, reqwest::Error> {
+    crate::net::http::init_tls_crypto();
     let client = reqwest::blocking::Client::new();
     let url = format!(
         "https://www.minecraft.net/content/minecraft-net/_jcr_content.articles.grid?pageSize={}",

@@ -6,7 +6,7 @@ use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
 use iced::widget::{
     button, column, container, pick_list, progress_bar, row, scrollable, text_input, Space,
 };
-use iced::{Alignment, Border, Color, ContentFit, Fill, Length};
+use iced::{Alignment, Border, Color, ContentFit, Fill, Length, Task};
 use std::time::Instant;
 
 const VERSIONS: [&str; 4] = ["1.21", "1.20.6", "1.20.1", "1.19.2"];
@@ -50,6 +50,10 @@ pub enum Message {
     Web(bool),
     Attach,
     Submit,
+    ApiEndpoint(String),
+    ApiModel(String),
+    ApiKey(String),
+    ApiReply(Result<String, String>),
     Pause(u64),
     Remove(u64),
 }
@@ -71,6 +75,11 @@ pub struct State {
     web: Toggle,
     pub tasks: Vec<TaskPreview>,
     pub notice: String,
+    pub endpoint: String,
+    pub model: String,
+    pub api_key: String,
+    pub reply: Option<String>,
+    pub busy: bool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -79,8 +88,13 @@ impl Default for State {
             batch: 0,
             version: VERSIONS[0],
             language: LANGUAGES[0],
-            web: Toggle::new(true),
-            notice: "AI 服务尚未连接".into(),
+            web: Toggle::new(false),
+            notice: "可配置 OpenAI 兼容 API 进行咨询；外部 MCP 工具需在 AI 客户端连接".into(),
+            endpoint: "https://api.openai.com/v1".into(),
+            model: String::new(),
+            api_key: String::new(),
+            reply: None,
+            busy: false,
             tasks: vec![],
         }
     }
@@ -90,21 +104,60 @@ impl State {
         self.web.active(now)
     }
 
-    pub fn update(&mut self, message: Message, now: Instant) {
+    pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
         match message {
+            Message::ApiEndpoint(v) => self.endpoint = v,
+            Message::ApiModel(v) => self.model = v,
+            Message::ApiKey(v) => self.api_key = v,
+            Message::ApiReply(result) => {
+                self.busy = false;
+                match result {
+                    Ok(reply) => {
+                        self.reply = Some(reply);
+                        self.notice = "模型已回复；没有执行任何本地更改".into();
+                    }
+                    Err(err) => {
+                        self.notice = format!("模型请求失败：{err}");
+                    }
+                }
+            }
             Message::Prompt(v) | Message::UsePrompt(v) => self.prompt = v,
             Message::NextPrompts => self.batch = (self.batch + 1) % PROMPTS.len(),
             Message::Version(v) => self.version = v,
             Message::Language(v) => self.language = v,
-            Message::Web(v) => self.web.set(v, now),
+            Message::Web(requested) => {
+                self.web.set(false, now);
+                if requested {
+                    self.notice = "联网搜索尚未接入。".into();
+                }
+            }
             Message::Attach => {
                 self.notice = "整合包 / Mod 文件导入尚未接入，未读取或上传文件。".into()
             }
             Message::Submit if self.prompt.trim().is_empty() => {
                 self.notice = "请先输入需求，或选择下方示例。".into()
             }
+            Message::Submit if self.busy => {}
+            Message::Submit if self.model.trim().is_empty() => {
+                self.notice = "请先填写 API 模型名称；密钥仅保存在当前运行内存中".into();
+            }
             Message::Submit => {
-                self.notice = "需求已保留。请先连接 AI 服务；当前未发送请求或创建真实任务。".into()
+                self.busy = true;
+                self.reply = None;
+                self.notice = "正在请求模型（只读咨询，不执行工具）…".into();
+                let endpoint = self.endpoint.clone();
+                let model = self.model.clone();
+                let key = self.api_key.clone();
+                let prompt = self.prompt.trim().to_owned();
+                let version = self.version.to_owned();
+                let language = self.language.to_owned();
+                return Task::perform(
+                    async move {
+                        crate::api_client::chat(endpoint, model, key, prompt, version, language)
+                            .await
+                    },
+                    Message::ApiReply,
+                );
             }
             Message::Pause(id) => {
                 if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
@@ -113,6 +166,7 @@ impl State {
             }
             Message::Remove(id) => self.tasks.retain(|t| t.id != id),
         }
+        Task::none()
     }
 }
 
@@ -136,7 +190,9 @@ pub fn view(state: &State, available_width: f32, cards: f32, now: Instant) -> El
     .align_y(Alignment::Center);
     let send_options = row![
         Space::new().width(Fill),
-        state.web.labeled_view(now, 24., "联网搜索", Message::Web),
+        state
+            .web
+            .labeled_view(now, 24., "联网搜索（未接入）", Message::Web),
         button(row![icon(Icon::Right, WHITE, 18.), label("发送", 12.)].spacing(6))
             .on_press(Message::Submit)
             .padding(12)
@@ -256,7 +312,22 @@ pub fn view(state: &State, available_width: f32, cards: f32, now: Instant) -> El
             example_row = row![].spacing(10);
         }
     }
-    let content = column![
+    let api_settings = container(
+        column![
+            bold("直连 API 配置", 14.),
+            label("支持 OpenAI Chat Completions 兼容端点；密钥仅在内存中使用，关闭应用后失效。自定义服务会收到你的输入与密钥。", 11.).color(MUTED),
+            text_input("API 地址，例如 https://api.openai.com/v1", &state.endpoint)
+                .on_input(Message::ApiEndpoint).padding(10).size(12),
+            row![
+                text_input("模型名称（必填）", &state.model)
+                    .on_input(Message::ApiModel).padding(10).size(12),
+                text_input("API Key（本地服务可留空）", &state.api_key)
+                    .secure(true).on_input(Message::ApiKey).padding(10).size(12),
+            ].spacing(10),
+            label("此模式仅提供问答与建议；外部 Agent 可连接 mc-mcp 使用真实只读工具。", 11.).color(MUTED),
+        ].spacing(10)
+    ).padding(14).style(theme::panel);
+    let mut content = column![
         row![
             icon(Icon::Spark, PURPLE, 40.),
             column![
@@ -270,12 +341,26 @@ pub fn view(state: &State, available_width: f32, cards: f32, now: Instant) -> El
         Space::new().height(12),
         motion::pop(composer, cards, true),
         label(&state.notice, 11.).color(MUTED),
+        api_settings,
         suggestions,
         container(column![bold("实用示例", 15.), examples].spacing(12))
             .padding(14)
             .style(theme::panel),
     ]
     .spacing(18);
+    if let Some(reply) = &state.reply {
+        content = content.push(
+            container(
+                column![
+                    bold("模型回复（未执行本地操作）", 15.),
+                    label(reply, 13.).color(WHITE)
+                ]
+                .spacing(10),
+            )
+            .padding(14)
+            .style(theme::panel),
+        );
+    }
     let panel_width = 268.;
     container(
         row![
@@ -411,12 +496,31 @@ mod tests {
     fn submission_without_a_provider_keeps_the_queue_empty() {
         let mut state = State::default();
         let now = Instant::now();
-        state.update(Message::Prompt("汉化整合包".into()), now);
-        state.update(Message::Submit, now);
+        let _ = state.update(Message::Prompt("汉化整合包".into()), now);
+        let _ = state.update(Message::Submit, now);
         assert!(state.tasks.is_empty());
         assert_eq!(state.prompt, "汉化整合包");
-        state.update(Message::Remove(1), now);
-        state.update(Message::Pause(3), now);
+        let _ = state.update(Message::Remove(1), now);
+        let _ = state.update(Message::Pause(3), now);
+        assert!(state.tasks.is_empty());
+    }
+
+    #[test]
+    fn model_requests_and_replies_preserve_animation_state_without_fake_tasks() {
+        let mut state = State::default();
+        let now = Instant::now();
+        let _ = state.update(Message::Web(true), now);
+        assert!(!state.animating(now + motion::SWITCH_DURATION));
+        assert!(state.notice.contains("尚未接入"));
+        let _ = state.update(Message::ApiModel("test-model".into()), now);
+        let _ = state.update(Message::Prompt("推荐优化配置".into()), now);
+        let request = state.update(Message::Submit, now);
+        assert_eq!(request.units(), 1);
+        assert!(state.busy);
+        assert!(state.reply.is_none());
+        let _ = state.update(Message::ApiReply(Ok("配置建议".into())), now);
+        assert!(!state.busy);
+        assert_eq!(state.reply.as_deref(), Some("配置建议"));
         assert!(state.tasks.is_empty());
     }
 }

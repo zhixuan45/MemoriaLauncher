@@ -3,7 +3,6 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io,
     path::{Path, PathBuf},
 };
 
@@ -15,7 +14,7 @@ use crate::{
         rules::{evaluate_rules, FeatureSet},
         version::{Library, LibraryArtifact},
     },
-    io::paths::safe_join,
+    io::paths::{safe_join, write_archive_entry},
     platform::{Arch, Os, Platform},
     Result,
 };
@@ -132,8 +131,13 @@ fn extract_native_jar(jar_path: &Path, destination: &Path, library: &Library) ->
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut output_file = File::create(output)?;
-        io::copy(&mut entry, &mut output_file)?;
+        if entry.unix_mode().is_some_and(|mode| mode & 0o170000 == 0o120000) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ZIP symlink entries are forbidden",
+            ).into());
+        }
+        write_archive_entry(&output, &mut entry)?;
     }
 
     Ok(())

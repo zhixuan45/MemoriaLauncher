@@ -14,7 +14,7 @@ Environment settings are saved to `%LOCALAPPDATA%\MemoriaLauncher\environment.js
 
 The core already implements PKCE authorization, Minecraft ownership checks, and token refresh. The desktop now supplies browser opening, a loopback HTTP callback, account selection, persistence, and logout.
 
-Use the launcher's own Microsoft application registration, with the matching redirect URI:
+Release builds embed the publisher's application ID through `MEMORIA_MICROSOFT_CLIENT_ID` at build time; players only click the Microsoft login button. Developers can override the embedded ID at runtime, with the matching redirect URI:
 
 ```powershell
 $env:MC_LAUNCHER_CLIENT_ID = "your-application-client-id"
@@ -30,7 +30,7 @@ Account names, UUIDs, and the active account are saved in `accounts.json` in the
 
 The download page loads Mojang's official version manifest asynchronously with a 30-second request timeout. Release IDs, snapshot IDs, publication timestamps, and metadata URLs come from that response. Unavailable descriptions, Java requirements, third-party loader compatibility, and hardware requirements are not synthesized. Failed requests display an error and can be retried without falling back to samples.
 
-Game installation, third-party resource catalogues, and AI execution are still unavailable. Their actions explain that state and never insert simulated work into the queues. General setting switches outside environment/account management retain their existing session-only behavior.
+Game installation and desktop third-party resource catalogues are still unavailable. AI supports optional OpenAI-compatible chat using a configured endpoint, model, and in-memory API key. The separate `mc-mcp` server exposes read-only real catalogue and local scan tools to external agents. Web search and AI installation/local mutation remain unavailable; actions never insert simulated work into the queues. General setting switches outside environment/account management retain their existing session-only behavior.
 
 ## Verification
 

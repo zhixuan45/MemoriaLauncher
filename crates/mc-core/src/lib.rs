@@ -20,5 +20,6 @@ pub fn initialize_runtime() {
 pub use service::{
     catalog::{CatalogProvider, MockCatalogProvider, MojangCatalogProvider},
     instance::{InstanceService, MockInstanceService},
+    online_catalog::OnlineCatalog,
     task::{InMemoryTaskService, TaskService},
 };

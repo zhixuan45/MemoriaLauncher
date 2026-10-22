@@ -166,6 +166,34 @@ async fn download_and_settings_tabs_are_clickable_and_state_survives_navigation(
 }
 
 #[tokio::test]
+async fn ai_request_reaches_the_runtime_and_retains_local_page_animation() {
+    let mut app = populated().await;
+    let _ = app.update(Message::Navigate(Page::Ai));
+    let _ = app.update(Message::Ai(crate::ai::Message::ApiModel(
+        "test-model".into(),
+    )));
+    let _ = app.update(Message::Ai(crate::ai::Message::Prompt("配置建议".into())));
+    let request = app.update(Message::Ai(crate::ai::Message::Submit));
+    assert_eq!(request.units(), 1);
+    assert!(app.ai.busy);
+    assert_eq!(
+        app.update(Message::Ai(crate::ai::Message::Submit)).units(),
+        0
+    );
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    let _ = app.update(Message::Ai(crate::ai::Message::ApiReply(Ok(
+        "模型建议".into()
+    ))));
+    assert_eq!(app.page, Page::Ai);
+    assert!(app.outgoing_page.is_none());
+    assert_eq!(app.ai.reply.as_deref(), Some("模型建议"));
+    assert!(!app.ai.busy);
+    assert!(app.ai.tasks.is_empty());
+}
+
+#[tokio::test]
 async fn modal_blocks_sidebar_until_dismissed() {
     let mut app = populated().await;
     let _ = app.update(Message::EditInstance);

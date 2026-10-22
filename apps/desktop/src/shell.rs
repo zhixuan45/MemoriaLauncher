@@ -347,7 +347,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 .padding(12)
                 .style(theme::action)
                 .on_press_maybe(
-                    (!app.accounts.busy && !app.launching)
+                    (!app.accounts.busy && !app.launching && app.accounts.has_microsoft_app())
                         .then_some(Message::Accounts(crate::accounts::Message::Login)),
                 ),
             );

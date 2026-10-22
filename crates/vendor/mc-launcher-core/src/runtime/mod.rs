@@ -45,6 +45,7 @@ fn get_jvm_platform_string() -> String {
 }
 
 pub fn get_jvm_runtimes() -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    crate::net::http::init_tls_crypto();
     let client = reqwest::blocking::Client::new();
     let response = client
         .get(JVM_MANIFEST_URL)
@@ -75,6 +76,7 @@ pub fn install_jvm_runtime(
     minecraft_directory: impl AsRef<Path>,
     callback: &CallbackDict,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    crate::net::http::init_tls_crypto();
     let client = reqwest::blocking::Client::new();
     let manifest_data: RuntimeListJson = client
         .get(JVM_MANIFEST_URL)
@@ -268,6 +270,7 @@ pub fn get_executable_path(
 pub fn get_jvm_runtime_information(
     jvm_version: &str,
 ) -> Result<JvmRuntimeInformation, Box<dyn std::error::Error>> {
+    crate::net::http::init_tls_crypto();
     let client = reqwest::blocking::Client::new();
     let manifest_data: RuntimeListJson = client
         .get(JVM_MANIFEST_URL)

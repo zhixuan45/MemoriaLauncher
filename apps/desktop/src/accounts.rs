@@ -58,6 +58,7 @@ pub struct State {
     pub logging_in: bool,
     pub notice: String,
     pub provider: Result<Provider, String>,
+    config: Result<MicrosoftAuthConfig, String>,
     path: PathBuf,
     cancel: Arc<Notify>,
     ready: bool,
@@ -77,9 +78,10 @@ pub fn data_dir() -> PathBuf {
 
 impl Default for State {
     fn default() -> Self {
-        let provider = MicrosoftAuthConfig::from_env()
-            .map(|config| Provider::new(config, Arc::new(SystemCredentialStore)))
-            .map_err(|e| e.to_string());
+        let config = configured_auth();
+        let provider = config
+            .clone()
+            .map(|config| Provider::new(config, Arc::new(SystemCredentialStore)));
         Self {
             index: AccountIndex::default(),
             busy: true,
@@ -87,10 +89,36 @@ impl Default for State {
             logging_in: false,
             notice: "正在读取已保存的账户…".into(),
             provider,
+            config,
             path: data_dir().join("accounts.json"),
             cancel: Arc::new(Notify::new()),
         }
     }
+}
+
+fn configured_client_id() -> String {
+    std::env::var("MC_LAUNCHER_CLIENT_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            option_env!("MEMORIA_MICROSOFT_CLIENT_ID")
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
+}
+
+fn configured_auth() -> Result<MicrosoftAuthConfig, String> {
+    let client_id = configured_client_id();
+    if client_id.trim().is_empty() {
+        return Err(
+            "当前发行版尚未配置 Microsoft 登录应用，请联系启动器开发者或更新发行版。".into(),
+        );
+    }
+    let redirect_uri = std::env::var("MC_LAUNCHER_REDIRECT_URI")
+        .unwrap_or_else(|_| "http://localhost:53682/oauth/callback".into());
+    callback_address(&redirect_uri)?;
+    MicrosoftAuthConfig::new(client_id.trim(), redirect_uri).map_err(|e| e.to_string())
 }
 
 async fn read_index(path: PathBuf) -> Result<AccountIndex, String> {
@@ -122,6 +150,10 @@ async fn write_index(path: &Path, index: AccountIndex) -> Result<AccountIndex, S
 }
 
 impl State {
+    pub fn has_microsoft_app(&self) -> bool {
+        self.config.is_ok()
+    }
+
     pub fn load(&self) -> Task<Message> {
         Task::perform(read_index(self.path.clone()), Message::Loaded)
     }
@@ -171,11 +203,20 @@ impl State {
                 self.logging_in = true;
                 self.cancel = Arc::new(Notify::new());
                 let cancel = self.cancel.clone();
+                let config = match &self.config {
+                    Ok(config) => config.clone(),
+                    Err(error) => {
+                        self.busy = false;
+                        self.logging_in = false;
+                        self.notice = error.clone();
+                        return Task::none();
+                    }
+                };
                 self.notice = "请在浏览器完成 Microsoft 登录；等待回调（最多 3 分钟）。".into();
                 return Task::perform(
                     async move {
                         tokio::select! {
-                            result = browser_login(provider) => result,
+                            result = browser_login(provider, config) => result,
                             _ = cancel.notified() => Err("已取消登录".into()),
                         }
                     },
@@ -252,21 +293,35 @@ impl State {
 }
 
 fn callback_address(redirect: &str) -> Result<(url::Url, u16), String> {
+    // Validate the raw URI before URL parsing can normalize traversal segments.
+    let remainder = redirect
+        .strip_prefix("http://")
+        .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
+        .ok_or("登录回调必须包含 HTTP 路径")?;
+    if remainder.is_empty() || remainder.contains("..") || remainder.contains('\\') {
+        return Err("登录回调路径无效".into());
+    }
     let url = url::Url::parse(redirect).map_err(|_| "登录回调地址无效")?;
     if url.scheme() != "http"
         || !matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
         || url.query().is_some()
         || url.fragment().is_some()
         || !url.username().is_empty()
+        || url.password().is_some()
     {
         return Err("桌面登录需要 http://localhost:端口/路径 或 127.0.0.1 回调地址。".into());
     }
-    let port = url.port_or_known_default().ok_or("登录回调缺少端口")?;
+    let port = url
+        .port()
+        .filter(|port| *port != 0)
+        .ok_or("登录回调缺少有效的显式端口")?;
     Ok((url, port))
 }
 
-async fn browser_login(provider: Provider) -> Result<AuthAccount, String> {
-    let config = MicrosoftAuthConfig::from_env().map_err(|e| e.to_string())?;
+async fn browser_login(
+    provider: Provider,
+    config: MicrosoftAuthConfig,
+) -> Result<AuthAccount, String> {
     let (redirect, port) = callback_address(&config.redirect_uri)?;
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
         .await
@@ -304,13 +359,18 @@ async fn receive_callback(
             let Ok(url) = redirect.join(target) else { continue; };
             let state = url.query_pairs().find(|(key, _)| key == "state").map(|(_, value)| value.into_owned());
             if method != Some("GET") || !target.starts_with('/') || url.origin() != redirect.origin()
-                || url.path() != redirect.path() || state.as_deref() != Some(expected_state) {
+                || target.split('?').next() != Some(redirect.path())
+                || url.path() != redirect.path() || state.as_deref() != Some(expected_state)
+                || !url.query_pairs().any(|(key, _)| key == "code" || key == "error") {
                 let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
                 continue;
             }
             let body = "Login response received. You can return to Memoria Launcher.";
             let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
             let _ = stream.write_all(response.as_bytes()).await;
+            if url.query_pairs().any(|(key, _)| key == "error") {
+                return Err("Microsoft 授权被取消或拒绝，请重新登录。".into());
+            }
             break Ok::<_, String>(url.to_string());
         }
     }).await.map_err(|_| "登录超时，请重新尝试。".to_string())?
@@ -402,6 +462,11 @@ mod tests {
             "http://0.0.0.0/callback",
             "file:///tmp/token",
             "http://localhost/?code=x",
+            "http://localhost:0/oauth/callback",
+            "http://localhost:53682/oauth/../admin",
+            "http://localhost:53682/",
+            "http://localhost:53682/oauth/callback#fragment",
+            "http://user:pass@localhost:53682/oauth/callback",
         ] {
             assert!(callback_address(url).is_err());
         }
@@ -416,12 +481,27 @@ mod tests {
             tokio::spawn(
                 async move { receive_callback(listener, &redirect, "expected-state").await },
             );
-        for (state, status) in [
-            ("wrong-state", "400 Bad Request"),
-            ("expected-state", "200 OK"),
+        for (target, status) in [
+            (
+                "/oauth/callback?code=test-code&state=wrong-state",
+                "400 Bad Request",
+            ),
+            ("/oauth/callback?state=expected-state", "400 Bad Request"),
+            (
+                "/oauth/callback/evil?code=test-code&state=expected-state",
+                "400 Bad Request",
+            ),
+            (
+                "/oauth/../oauth/callback?code=test-code&state=expected-state",
+                "400 Bad Request",
+            ),
+            (
+                "/oauth/callback?code=test-code&state=expected%2Dstate",
+                "200 OK",
+            ),
         ] {
             let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
-            let request = format!("GET /oauth/callback?code=test-code&state={state} HTTP/1.1\r\nHost: {address}\r\n\r\n");
+            let request = format!("GET {target} HTTP/1.1\r\nHost: {address}\r\n\r\n");
             client.write_all(request.as_bytes()).await.unwrap();
             let mut response = String::new();
             tokio::time::timeout(Duration::from_secs(5), client.read_to_string(&mut response))
@@ -432,5 +512,13 @@ mod tests {
         }
         let callback = receiver.await.unwrap().unwrap();
         assert!(callback.contains("code=test-code"));
+    }
+
+    #[test]
+    fn starts_without_fake_accounts_and_reports_publisher_configuration() {
+        let state = State::default();
+        assert!(state.index.current().is_none());
+        assert!(state.index.accounts.is_empty());
+        assert_eq!(state.has_microsoft_app(), state.provider.is_ok());
     }
 }

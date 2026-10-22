@@ -4,6 +4,11 @@ use reqwest::blocking::Client;
 
 use crate::Result;
 
+/// Standalone callers also need a provider for the rustls-no-provider transport.
+pub(crate) fn init_tls_crypto() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Returns the user agent used by crate-managed HTTP requests.
 pub fn user_agent() -> String {
     format!("mc-launcher-core/{}", env!("CARGO_PKG_VERSION"))
@@ -15,6 +20,7 @@ pub fn user_agent() -> String {
 ///
 /// Returns [`crate::LauncherError`] if the client cannot be constructed.
 pub fn client() -> Result<Client> {
+    init_tls_crypto();
     Ok(Client::builder().user_agent(user_agent()).build()?)
 }
 

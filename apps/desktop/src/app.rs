@@ -446,7 +446,10 @@ impl Launcher {
             }
             Message::Ai(message) => {
                 self.animation_time = Instant::now().max(self.animation_time);
-                self.ai.update(message, self.animation_time);
+                return self
+                    .ai
+                    .update(message, self.animation_time)
+                    .map(Message::Ai);
             }
             Message::Capture => {
                 return window::latest()

@@ -86,6 +86,7 @@ pub fn download_file(
             .header(header::USER_AGENT, get_user_agent())
             .send()?
     } else {
+        crate::net::http::init_tls_crypto();
         let client = Client::builder()
             .user_agent(get_user_agent()) // 设置 User-Agent
             .build()?;
@@ -335,6 +336,7 @@ pub fn get_user_agent() -> String {
 }
 
 pub fn get_requests_response_cache(url: &str) -> Result<String, reqwest::Error> {
+    crate::net::http::init_tls_crypto();
     let mut cache = REQUESTS_RESPONSE_CACHE.lock().unwrap();
     if let Some(cache_entry) = cache.get(url) {
         let elapsed = Utc::now().signed_duration_since(cache_entry.datetime);

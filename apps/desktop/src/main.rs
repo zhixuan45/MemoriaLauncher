@@ -1,5 +1,6 @@
 mod accounts;
 mod ai;
+mod api_client;
 mod app;
 mod assets;
 mod credentials;
