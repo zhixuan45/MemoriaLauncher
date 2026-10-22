@@ -206,7 +206,7 @@ async fn browser_login(
             let _ = stream.write_all(response.as_bytes()).await;
             if accepted {
                 if target.split_once('?').is_some_and(|(_, query)| query.split('&').any(|part| part.starts_with("error="))) {
-                    return Err("Microsoft 授权被取消或拒绝，请重新登录。".into());
+                    return Err("Microsoft 授权被取消或拒绝，请重新登录。".to_owned());
                 }
                 return Ok(format!("{}{}", callback.redirect_uri, &target[callback.path.len()..]));
             }
