@@ -1,7 +1,7 @@
 //! Path-safety helpers.
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{self, Read},
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -43,7 +43,16 @@ pub fn safe_join(base: impl AsRef<Path>, relative: impl AsRef<Path>) -> Result<P
 
     // A lexically safe path can still escape through a pre-existing symlink
     // (or a Windows junction / reparse point). Never follow these.
-    let boundary = fs::canonicalize(base)?;
+    // The base may not exist yet for callers constructing installation paths.
+    // Resolve its nearest existing ancestor, then inspect every existing child.
+    let mut ancestor = base;
+    while !ancestor.exists() {
+        ancestor = ancestor.parent().ok_or_else(|| LauncherError::UnsafePath {
+            base: base.to_path_buf(),
+            path: relative.to_path_buf(),
+        })?;
+    }
+    let boundary = fs::canonicalize(ancestor)?;
     let mut candidate = base.to_path_buf();
     for component in relative.components() {
         candidate.push(component.as_os_str());
@@ -126,4 +135,56 @@ pub fn ensure_inside_base(base: impl AsRef<Path>, path: impl AsRef<Path>) -> Res
         });
     }
     Ok(())
+}
+
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn sandbox() -> PathBuf {
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("memoria-zip-security-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn safe_join_rejects_symlinked_intermediate_directory() {
+        let root = sandbox();
+        let inside = root.join("extract");
+        let outside = root.join("outside");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, inside.join("escape")).unwrap();
+        assert!(safe_join(&inside, "escape/target.txt").is_err());
+        assert!(!outside.join("target.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn safe_join_rejects_symlinked_leaf() {
+        let root = sandbox();
+        let inside = root.join("extract");
+        fs::create_dir_all(&inside).unwrap();
+        let target = root.join("outside.txt");
+        fs::write(&target, b"original").unwrap();
+        std::os::unix::fs::symlink(&target, inside.join("file.txt")).unwrap();
+        assert!(safe_join(&inside, "file.txt").is_err());
+        assert_eq!(fs::read(target).unwrap(), b"original");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn staged_entry_replaces_regular_file_without_partial_write() {
+        let root = sandbox();
+        let file = root.join("lib.so");
+        fs::write(&file, b"old").unwrap();
+        write_archive_entry(&file, &mut &b"new"[..]).unwrap();
+        assert_eq!(fs::read(&file).unwrap(), b"new");
+        fs::remove_dir_all(root).unwrap();
+    }
 }
