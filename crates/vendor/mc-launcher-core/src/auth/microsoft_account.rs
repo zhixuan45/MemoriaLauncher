@@ -129,55 +129,29 @@ pub fn url_contains_auth_code(url: &str) -> bool {
 
 /// Extracts the raw `code` query parameter from a redirect URL.
 pub fn get_auth_code_from_url(url: &str) -> Option<String> {
-    if let Ok(parsed) = Url::parse(url) {
-        if let Some(qs) = parsed.query() {
-            let query_pairs: HashMap<_, _> = qs
-                .split('&')
-                .filter_map(|s| {
-                    let mut split = s.split('=');
-                    let key = split.next()?;
-                    let value = split.next()?;
-                    Some((key, value.to_string()))
-                })
-                .collect();
-            if let Some(code) = query_pairs.get("code") {
-                return Some(code.clone());
-            }
-        }
-    }
-    None
+    Url::parse(url).ok()?.query_pairs()
+        .find(|(key, _)| key == "code")
+        .map(|(_, value)| value.into_owned())
 }
 
 /// Parses a redirect URL and validates the optional state value.
 ///
-/// # Errors
-///
-/// Returns an error when the URL has no auth code or the state value does not
-/// match the expected state.
+/// URL query values are percent-decoded before the OAuth token exchange.
 pub fn parse_auth_code_url(
     url: &str,
     state: Option<String>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    if let Ok(parsed) = Url::parse(url) {
-        if let Some(qs) = parsed.query() {
-            let query_pairs: HashMap<_, _> = qs
-                .split('&')
-                .filter_map(|s| {
-                    let mut split = s.split('=');
-                    let key = split.next()?;
-                    let value = split.next()?;
-                    Some((key, value.to_string()))
-                })
-                .collect();
-            if state.is_some() && state != query_pairs.get("state").cloned() {
-                return Err("state not equal.".into());
-            }
-            if let Some(code) = query_pairs.get("code") {
-                return Ok(code.clone());
-            }
-        }
+    let parsed = Url::parse(url)?;
+    let parameters: HashMap<String, String> = parsed.query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    if state.as_deref().is_some_and(|expected| {
+        parameters.get("state").map(String::as_str) != Some(expected)
+    }) {
+        return Err("state not equal.".into());
     }
-    Err("parse_auth_code_url error.".into())
+    parameters.get("code").filter(|code| !code.is_empty()).cloned()
+        .ok_or_else(|| "parse_auth_code_url error.".into())
 }
 
 /// Exchanges an OAuth authorization code for Microsoft access and refresh tokens.
@@ -533,5 +507,13 @@ mod test {
     fn test_get_auth_code_from_url() {
         let url = "https://test.example.com/test?code1=2&code=13&t=sd";
         assert_eq!(get_auth_code_from_url(url), Some("13".to_string()));
+    }
+
+    #[test]
+    fn parses_percent_encoded_code_and_validates_state() {
+        let uri = "http://localhost:53682/oauth/callback?code=abc%2Bdef%3D&state=csrf%2Ftoken";
+        assert_eq!(parse_auth_code_url(uri, Some("csrf/token".into())).unwrap(), "abc+def=");
+        assert!(parse_auth_code_url(uri, Some("wrong".into())).is_err());
+        assert!(parse_auth_code_url("http://localhost/callback?state=ok", Some("ok".into())).is_err());
     }
 }
