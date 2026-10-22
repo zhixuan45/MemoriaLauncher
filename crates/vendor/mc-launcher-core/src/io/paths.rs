@@ -1,6 +1,14 @@
 //! Path-safety helpers.
 
-use std::path::{Component, Path, PathBuf};
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{self, Read},
+    path::{Component, Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
+
 
 use crate::{LauncherError, Result};
 
@@ -33,8 +41,75 @@ pub fn safe_join(base: impl AsRef<Path>, relative: impl AsRef<Path>) -> Result<P
         }
     }
 
-    Ok(base.join(relative))
+    // A lexically safe path can still escape through a pre-existing symlink
+    // (or a Windows junction / reparse point). Never follow these.
+    let boundary = fs::canonicalize(base)?;
+    let mut candidate = base.to_path_buf();
+    for component in relative.components() {
+        candidate.push(component.as_os_str());
+        match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink()
+                    || !candidate.canonicalize()?.starts_with(&boundary)
+                {
+                    return Err(LauncherError::UnsafePath {
+                        base: base.to_path_buf(),
+                        path: candidate,
+                    });
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    Ok(candidate)
 }
+
+/// Stage bytes in a newly created sibling and rename the file into place.
+/// This prevents following a symlink at the final path, and avoids leaving
+/// a partially written library when an archive is malformed.
+pub fn write_archive_entry<R: Read>(output: &Path, input: &mut R) -> io::Result<()> {
+    let parent = output.parent().ok_or_else(|| io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "archive entry has no parent directory",
+    ))?;
+    let basename = output.file_name().ok_or_else(|| io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "archive entry has no filename",
+    ))?.to_string_lossy();
+
+    for _ in 0..32 {
+        let counter = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+        let staging = parent.join(format!(".{basename}.{}.{counter}.part", std::process::id()));
+        let mut staged = match OpenOptions::new().write(true).create_new(true).open(&staging) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        };
+        let result = (|| {
+            io::copy(input, &mut staged)?;
+            staged.sync_all()?;
+            drop(staged);
+            // Windows rename does not overwrite. Remove the directory entry,
+            // not the symlink's target, before installing the staged file.
+            #[cfg(windows)]
+            if fs::symlink_metadata(output).is_ok() {
+                fs::remove_file(output)?;
+            }
+            fs::rename(&staging, output)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&staging);
+        }
+        return result;
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not reserve a temporary archive entry",
+    ))
+}
+
 
 /// Verifies that a path is inside a base directory.
 ///
