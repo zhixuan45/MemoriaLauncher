@@ -176,15 +176,11 @@ fn sidebar(app: &Launcher) -> Element<'_, Message> {
                     row![
                         icon(Icon::Gamepad, GREEN, 18.),
                         column![
+                            label(app.accounts.active().map(|a| a.username.as_str()).unwrap_or("未登录"), 12.),
                             label(
-                                if app.profile == 0 {
-                                    "Steve_AI"
-                                } else {
-                                    "Alex_Builder"
-                                },
-                                12.
-                            ),
-                            label("离线示例档案", 9.).color(MUTED)
+                                if app.accounts.active().is_some() { "Microsoft 正版账号" } else { "点击添加正版账号" },
+                                9.
+                            ).color(MUTED)
                         ],
                         Space::new().width(Fill),
                         icon(Icon::Right, MUTED, 12.)
@@ -275,20 +271,53 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
         }
         Modal::Profile => {
             content = content
-                .push(label("当前为离线示例档案；微软登录尚未接入。", 13.).color(MUTED))
-                .push(bold(
-                    if app.profile == 0 {
-                        "Steve_AI"
-                    } else {
-                        "Alex_Builder"
-                    },
-                    25.,
-                ))
-                .push(
-                    button(label("切换示例档案", 14.))
-                        .style(theme::quiet)
-                        .on_press(Message::CycleProfile),
+                .push(label("Microsoft / Minecraft Java 正版账户", 14.))
+                .push(label("通过 Microsoft 官方页面验证身份，授权完成后将自动返回启动器。", 12.).color(MUTED))
+                .push(label(app.accounts.notice.clone(), 12.).color(MUTED))
+                .push(label("安全提示：当前版本仅在运行期间保存凭据，重启后需要重新登录。", 11.).color(MUTED));
+            let login = button(label(
+                if app.accounts.busy { "正在等待 Microsoft 授权…" } else { "使用 Microsoft 登录" },
+                13.,
+            )).style(theme::action).padding(12);
+            content = content.push(if app.accounts.busy || !app.accounts.has_microsoft_app() {
+                login
+            } else {
+                login.on_press(Message::Accounts(crate::accounts::Message::BeginLogin))
+            });
+            if !app.accounts.has_microsoft_app() {
+                content = content.push(label("当前构建尚未配置 Microsoft 应用，需由启动器发行方提供；玩家无需自行配置。", 11.).color(MUTED));
+            }
+            if app.accounts.accounts.is_empty() {
+                content = content.push(label("暂无已验证的正版账户。", 12.).color(MUTED));
+            }
+            for account in &app.accounts.accounts {
+                let is_active = app.accounts.selected.as_deref() == Some(account.id.as_str());
+                let select = button(label(if is_active { "当前使用" } else { "设为当前" }, 11.))
+                    .padding(8)
+                    .style(theme::quiet);
+                let logout = button(label("退出", 11.)).padding(8).style(theme::quiet);
+                content = content.push(
+                    row![
+                        icon(Icon::Gamepad, GREEN, 22.),
+                        column![
+                            bold(account.username.clone(), 13.),
+                            label(account.uuid.clone(), 10.).color(MUTED),
+                        ].spacing(4).width(Fill),
+                        if app.accounts.busy || is_active {
+                            select
+                        } else {
+                            select.on_press(Message::Accounts(crate::accounts::Message::Select(account.id.clone())))
+                        },
+                        if app.accounts.busy {
+                            logout
+                        } else {
+                            logout.on_press(Message::Accounts(crate::accounts::Message::Logout(account.id.clone())))
+                        },
+                    ]
+                    .spacing(10)
+                    .align_y(Alignment::Center)
                 );
+            }
         }
     }
     let dialog = container(scrollable(content).direction(theme::scroll_direction()))

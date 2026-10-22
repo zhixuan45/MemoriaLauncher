@@ -1,0 +1,26 @@
+name: Rust auth checks
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'crates/mc-core/**'
+      - 'crates/vendor/mc-launcher-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/rust-auth.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Core unit tests
+        run: cargo test -p mc-core --locked
+      - name: Desktop compilation
+        run: cargo check -p desktop --locked
+      - name: Desktop unit tests
+        run: cargo test -p desktop --locked

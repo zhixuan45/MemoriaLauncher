@@ -190,6 +190,13 @@ where
         login: &LoginStart,
         redirect_url: &str,
     ) -> LauncherResult<AuthAccount> {
+        // Reject lookalike callbacks before parsing the authorization code or making network calls.
+        if !redirect_url.strip_prefix(self.config.redirect_uri.as_str())
+            .is_some_and(|suffix| suffix.starts_with('?')) {
+            return Err(LauncherError::AuthUnavailable(
+                "OAuth 回调地址与当前应用配置不一致".into(),
+            ));
+        }
         let auth_code = mc_launcher_core::auth::microsoft_account::parse_auth_code_url(
             redirect_url,
             Some(login.state.clone()),
@@ -374,6 +381,11 @@ where
             tokio::task::spawn_blocking(move || exchange_refresh_token(&config, &refresh_token))
                 .await
                 .map_err(|e| LauncherError::Internal(e.to_string()))??;
+        if result.account.id != account_id {
+            return Err(LauncherError::AuthUnavailable(
+                "刷新返回的 Minecraft 档案与所选账户不一致".into(),
+            ));
+        }
         self.store
             .save(StoredCredential {
                 account_id: result.account.id,
@@ -452,6 +464,17 @@ mod tests {
             })
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn wrong_redirect_is_rejected_before_token_exchange() {
+        let provider = MicrosoftAuthProvider::new(
+            MicrosoftAuthConfig::new("client", "http://localhost:53682/oauth/callback").unwrap(),
+            Arc::new(MemoryCredentialStore::default()),
+        );
+        let login = provider.begin_login();
+        let forged = format!("http://localhost:53682/oauth/callback-evil?code=abc&state={}", login.state);
+        assert!(provider.complete_login(&login, &forged).await.is_err());
     }
 
     #[test]
