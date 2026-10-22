@@ -2,7 +2,7 @@ use crate::app::{Launcher, Message, Modal, Page};
 use crate::assets::{icon, picture, Icon, ART};
 use crate::models::{CHANGELOG, FEATURE_DESCRIPTIONS, FEATURE_TITLES};
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, Space};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text_input, Space};
 use iced::{Alignment, Background, Color, ContentFit, Element, Fill};
 
 pub fn icon_button(kind: Icon, message: Message) -> Element<'static, Message> {
@@ -176,15 +176,11 @@ fn sidebar(app: &Launcher) -> Element<'_, Message> {
                     row![
                         icon(Icon::Gamepad, GREEN, 18.),
                         column![
+                            label(app.accounts.active().map(|a| a.username.as_str()).unwrap_or("未登录"), 12.),
                             label(
-                                if app.profile == 0 {
-                                    "Steve_AI"
-                                } else {
-                                    "Alex_Builder"
-                                },
-                                12.
-                            ),
-                            label("离线示例档案", 9.).color(MUTED)
+                                if app.accounts.active().is_some() { "Microsoft 正版账号" } else { "点击添加正版账号" },
+                                9.
+                            ).color(MUTED)
                         ],
                         Space::new().width(Fill),
                         icon(Icon::Right, MUTED, 12.)
@@ -275,20 +271,58 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
         }
         Modal::Profile => {
             content = content
-                .push(label("当前为离线示例档案；微软登录尚未接入。", 13.).color(MUTED))
-                .push(bold(
-                    if app.profile == 0 {
-                        "Steve_AI"
-                    } else {
-                        "Alex_Builder"
-                    },
-                    25.,
-                ))
-                .push(
-                    button(label("切换示例档案", 14.))
-                        .style(theme::quiet)
-                        .on_press(Message::CycleProfile),
+                .push(label("Microsoft / Minecraft Java 正版账户", 14.))
+                .push(label("请填写你注册的 Microsoft 公共客户端应用 ID；回调地址必须与 Azure 应用注册相同。", 11.).color(MUTED))
+                .push(label("应用客户端 ID", 11.).color(MUTED))
+                .push(text_input("Microsoft Application (client) ID", &app.accounts.client_id)
+                    .on_input(|value| Message::Accounts(crate::accounts::Message::ClientIdChanged(value)))
+                    .padding(10))
+                .push(label("本机 OAuth 回调地址", 11.).color(MUTED))
+                .push(text_input("http://localhost:53682/oauth/callback", &app.accounts.redirect_uri)
+                    .on_input(|value| Message::Accounts(crate::accounts::Message::RedirectChanged(value)))
+                    .padding(10))
+                .push(label(app.accounts.notice.clone(), 12.).color(MUTED))
+                .push(label("安全提示：refresh token 目前只保存在本进程内存，关闭启动器后需重新登录。", 11.).color(MUTED));
+            let login = button(label(
+                if app.accounts.busy { "正在等待登录…" } else { "使用浏览器登录 Microsoft" },
+                13.,
+            )).style(theme::action).padding(12);
+            content = content.push(if app.accounts.busy {
+                login
+            } else {
+                login.on_press(Message::Accounts(crate::accounts::Message::BeginLogin))
+            });
+            if app.accounts.accounts.is_empty() {
+                content = content.push(label("暂无已验证的正版账户。", 12.).color(MUTED));
+            }
+            for account in &app.accounts.accounts {
+                let is_active = app.accounts.selected.as_deref() == Some(account.id.as_str());
+                let select = button(label(if is_active { "当前使用" } else { "设为当前" }, 11.))
+                    .padding(8)
+                    .style(theme::quiet);
+                let logout = button(label("退出", 11.)).padding(8).style(theme::quiet);
+                content = content.push(
+                    row![
+                        icon(Icon::Gamepad, GREEN, 22.),
+                        column![
+                            bold(account.username.clone(), 13.),
+                            label(account.uuid.clone(), 10.).color(MUTED),
+                        ].spacing(4).width(Fill),
+                        if app.accounts.busy || is_active {
+                            select
+                        } else {
+                            select.on_press(Message::Accounts(crate::accounts::Message::Select(account.id.clone())))
+                        },
+                        if app.accounts.busy {
+                            logout
+                        } else {
+                            logout.on_press(Message::Accounts(crate::accounts::Message::Logout(account.id.clone())))
+                        },
+                    ]
+                    .spacing(10)
+                    .align_y(Alignment::Center)
                 );
+            }
         }
     }
     let dialog = container(scrollable(content).direction(theme::scroll_direction()))
