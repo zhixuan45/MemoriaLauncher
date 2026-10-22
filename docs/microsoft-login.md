@@ -14,7 +14,7 @@ iced 桌面端的侧边栏玩家档案与「设置 → 常规 → 账户与数�
 
 ## 面向发行方：只注册一次应用
 
-1. 在 [Microsoft Entra 应用注册](https://entra.microsoft.com/) 创建应用，支持个人 Microsoft 账户，选择 **Mobile and desktop applications（公共客户端）**；根据 Entra 的当前要求，为系统浏览器注册 `http://localhost`，如果环境允许也可配置与程序一致的 `http://localhost:53682/oauth/callback`。注意：回调 URI 的路径仍需和实际请求一致；`localhost` 端口匹配在 Entra 中有特殊规则。启用公共客户端流程。不能使用 client secret 嵌入桌面应用。
+1. 在 [Microsoft Entra 应用注册](https://entra.microsoft.com/) 创建应用，支持个人 Microsoft 账户，选择 **Mobile and desktop applications（公共客户端）**；为目前的登录回调配置与程序**路径完全一致**的自定义回调 URI，例如 `http://localhost/oauth/callback`（或 `http://localhost:53682/oauth/callback`，取决于 Entra 页面允许的录入格式）。Entra 对 `localhost` 的端口匹配有特殊规则，但不会忽略路径；**仅配置 `http://localhost` 而启动器使用 `/oauth/callback` 会导致回调不匹配**。启用公共客户端流程。不能使用 client secret 嵌入桌面应用。
 2. 记录这 **一个** 应用的 Application (client) ID，构建 Memoria Launcher 时通过环境变量 `MEMORIA_MICROSOFT_CLIENT_ID` 注入。例如：
 
    ```sh
