@@ -1,3 +1,4 @@
+mod accounts;
 mod ai;
 mod app;
 mod assets;
