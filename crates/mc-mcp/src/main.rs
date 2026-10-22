@@ -152,9 +152,8 @@ async fn call_tool(name: &str, args: &Value, catalog: &OnlineCatalog, root: &Pat
                                 "loader": c.instance.loader, "client_jar_present": c.client_jar_present,
                                 "java_major": c.java_major
                             })).collect();
-                            let warnings: Vec<String> = report.issues.iter()
-                                .map(|i| format!("{}: {}", i.path.display(), i.message)).collect();
-                            Ok(json!({"source": "local_scan", "instances": clients, "warnings": warnings}))
+                            Ok(json!({"source": "local_scan", "instances": clients,
+                                "warning_count": report.issues.len()}))
                         }
                     }
                 }

@@ -85,7 +85,7 @@ impl Default for State {
             batch: 0,
             version: VERSIONS[0],
             language: LANGUAGES[0],
-            web: true,
+            web: false,
             notice: "可配置 OpenAI 兼容 API 进行咨询；外部 MCP 工具需在 AI 客户端连接".into(),
             endpoint: "https://api.openai.com/v1".into(),
             model: String::new(),
