@@ -8,6 +8,10 @@ instances/
 cache/
 logs/
 .minecraft/
+.memoria-launcher/
+.env
+.env.*
+!.env.example
 
 # IDE 与编辑器配置
 .idea/

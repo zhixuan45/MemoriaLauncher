@@ -15,6 +15,71 @@ use tokio::{
 
 pub type Provider = MicrosoftAuthProvider<SystemCredentialStore>;
 
+const DEFAULT_REDIRECT_URI: &str = "http://localhost:53682/oauth/callback";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoginSettings {
+    pub client_id: String,
+    pub redirect_uri: String,
+}
+
+impl LoginSettings {
+    fn fallback() -> Self {
+        Self {
+            client_id: configured_client_id(),
+            redirect_uri: std::env::var("MC_LAUNCHER_REDIRECT_URI")
+                .unwrap_or_else(|_| DEFAULT_REDIRECT_URI.into()),
+        }
+    }
+
+    fn normalized(&self) -> Self {
+        Self {
+            client_id: self.client_id.trim().into(),
+            redirect_uri: self.redirect_uri.trim().into(),
+        }
+    }
+
+    fn auth_config(&self) -> Result<MicrosoftAuthConfig, String> {
+        if self.client_id.trim().is_empty() {
+            return Err("请在设置 → 账户登录中填写 Microsoft 应用的客户端 ID。".into());
+        }
+        uuid::Uuid::parse_str(&self.client_id)
+            .map_err(|_| "客户端 ID 格式无效，请复制应用概述页的应用程序（客户端）ID。")?;
+        callback_address(&self.redirect_uri)?;
+        MicrosoftAuthConfig::new(&self.client_id, &self.redirect_uri).map_err(|e| e.to_string())
+    }
+}
+
+fn read_login_settings(path: &Path) -> Result<Option<LoginSettings>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|e| format!("登录配置读取失败，请在设置中重新保存：{e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("登录配置读取失败：{e}")),
+    }
+}
+
+async fn save_login_settings(
+    path: PathBuf,
+    settings: LoginSettings,
+) -> Result<LoginSettings, String> {
+    let settings = settings.normalized();
+    settings.auth_config()?;
+    let bytes = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(path.parent().ok_or("登录配置路径无效")?)
+        .await
+        .map_err(|e| e.to_string())?;
+    let temporary = path.with_extension("json.tmp");
+    tokio::fs::write(&temporary, bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::fs::rename(&temporary, &path)
+        .await
+        .map_err(|e| format!("登录配置保存失败：{e}"))?;
+    Ok(settings)
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AccountIndex {
     pub accounts: Vec<AuthAccount>,
@@ -43,6 +108,10 @@ impl AccountIndex {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    ClientId(String),
+    RedirectUri(String),
+    SaveLoginSettings,
+    LoginSettingsSaved(Result<LoginSettings, String>),
     Loaded(Result<AccountIndex, String>),
     Login,
     CancelLogin,
@@ -58,6 +127,9 @@ pub struct State {
     pub logging_in: bool,
     pub notice: String,
     pub provider: Result<Provider, String>,
+    pub login_settings: LoginSettings,
+    pub settings_notice: String,
+    pub settings_saving: bool,
     config: Result<MicrosoftAuthConfig, String>,
     path: PathBuf,
     cancel: Arc<Notify>,
@@ -78,7 +150,26 @@ pub fn data_dir() -> PathBuf {
 
 impl Default for State {
     fn default() -> Self {
-        let config = configured_auth();
+        Self::from_directory(data_dir())
+    }
+}
+
+impl State {
+    fn from_directory(directory: PathBuf) -> Self {
+        let (login_settings, config) =
+            match read_login_settings(&directory.join("microsoft-login.json")) {
+                Ok(saved) => {
+                    let settings = saved.unwrap_or_else(LoginSettings::fallback).normalized();
+                    let config = settings.auth_config();
+                    (settings, config)
+                }
+                Err(error) => (LoginSettings::fallback(), Err(error)),
+            };
+        let settings_notice = config
+            .as_ref()
+            .err()
+            .cloned()
+            .unwrap_or_else(|| "登录配置已加载。保存后立即生效，下次启动自动读取。".into());
         let provider = config
             .clone()
             .map(|config| Provider::new(config, Arc::new(SystemCredentialStore)));
@@ -89,8 +180,11 @@ impl Default for State {
             logging_in: false,
             notice: "正在读取已保存的账户…".into(),
             provider,
+            login_settings,
+            settings_notice,
+            settings_saving: false,
             config,
-            path: data_dir().join("accounts.json"),
+            path: directory.join("accounts.json"),
             cancel: Arc::new(Notify::new()),
         }
     }
@@ -106,19 +200,6 @@ fn configured_client_id() -> String {
                 .map(str::to_owned)
         })
         .unwrap_or_default()
-}
-
-fn configured_auth() -> Result<MicrosoftAuthConfig, String> {
-    let client_id = configured_client_id();
-    if client_id.trim().is_empty() {
-        return Err(
-            "当前发行版尚未配置 Microsoft 登录应用，请联系启动器开发者或更新发行版。".into(),
-        );
-    }
-    let redirect_uri = std::env::var("MC_LAUNCHER_REDIRECT_URI")
-        .unwrap_or_else(|_| "http://localhost:53682/oauth/callback".into());
-    callback_address(&redirect_uri)?;
-    MicrosoftAuthConfig::new(client_id.trim(), redirect_uri).map_err(|e| e.to_string())
 }
 
 async fn read_index(path: PathBuf) -> Result<AccountIndex, String> {
@@ -175,6 +256,56 @@ impl State {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::ClientId(value) if !self.busy => {
+                self.login_settings.client_id = value;
+                self.settings_notice = "修改尚未保存，请点击保存登录配置。".into();
+            }
+            Message::RedirectUri(value) if !self.busy => {
+                self.login_settings.redirect_uri = value;
+                self.settings_notice = "修改尚未保存，请点击保存登录配置。".into();
+            }
+            Message::SaveLoginSettings if !self.busy => {
+                let settings = self.login_settings.normalized();
+                if let Err(error) = settings.auth_config() {
+                    self.settings_notice = error;
+                    return Task::none();
+                }
+                self.busy = true;
+                self.settings_saving = true;
+                self.settings_notice = "正在保存登录配置…".into();
+                return Task::perform(
+                    save_login_settings(self.path.with_file_name("microsoft-login.json"), settings),
+                    Message::LoginSettingsSaved,
+                );
+            }
+            Message::LoginSettingsSaved(result) => {
+                self.busy = false;
+                self.settings_saving = false;
+                match result {
+                    Ok(settings) => match settings.auth_config() {
+                        Ok(config) => {
+                            let changed = self
+                                .config
+                                .as_ref()
+                                .is_ok_and(|old| old.client_id != config.client_id);
+                            self.provider = Ok(Provider::new(
+                                config.clone(),
+                                Arc::new(SystemCredentialStore),
+                            ));
+                            self.config = Ok(config);
+                            self.login_settings = settings;
+                            self.settings_notice = if changed && !self.index.accounts.is_empty() {
+                                "登录配置已保存并生效。客户端 ID 已更改，请重新登录已有账户。"
+                            } else {
+                                "登录配置已保存并生效，下次启动自动读取。现在可以添加 Microsoft 账户。"
+                            }.into();
+                            self.notice = self.settings_notice.clone();
+                        }
+                        Err(error) => self.settings_notice = error,
+                    },
+                    Err(error) => self.settings_notice = error,
+                }
+            }
             Message::Loaded(result) => {
                 self.busy = false;
                 match result {
@@ -407,6 +538,82 @@ fn open_browser(url: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn saved_login_settings_survive_restart_and_immediately_configure_the_provider() {
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-fixtures")
+            .join(format!("login-settings-{}", std::process::id()));
+        let path = directory.join("microsoft-login.json");
+        let first = LoginSettings {
+            client_id: "12345678-1234-1234-1234-123456789abc".into(),
+            redirect_uri: DEFAULT_REDIRECT_URI.into(),
+        };
+        save_login_settings(path.clone(), first.clone())
+            .await
+            .unwrap();
+        let mut state = State::from_directory(directory.clone());
+        let _ = state.update(Message::Loaded(Ok(AccountIndex::default())));
+        assert_eq!(state.login_settings, first);
+        assert!(state.has_microsoft_app());
+        let changed = LoginSettings {
+            client_id: "abcdefab-1234-1234-1234-123456789abc".into(),
+            redirect_uri: "http://localhost:53683/oauth/callback".into(),
+        };
+        let saved = save_login_settings(path.clone(), changed.clone()).await;
+        let _ = state.update(Message::LoginSettingsSaved(saved));
+        let login = state.provider.as_ref().unwrap().begin_login();
+        let url = url::Url::parse(&login.authorization_url).unwrap();
+        assert!(url
+            .query_pairs()
+            .any(|(k, v)| k == "client_id" && v == changed.client_id));
+        assert!(url
+            .query_pairs()
+            .any(|(k, v)| k == "redirect_uri" && v == changed.redirect_uri));
+        assert_eq!(
+            State::from_directory(directory.clone()).login_settings,
+            changed
+        );
+
+        // Invalid edits and disk failures preserve the last usable provider and file.
+        for invalid in [
+            LoginSettings {
+                client_id: "not-an-app-id".into(),
+                ..first.clone()
+            },
+            LoginSettings {
+                redirect_uri: "http://example.com:53682/oauth/callback".into(),
+                ..first.clone()
+            },
+        ] {
+            assert!(save_login_settings(path.clone(), invalid).await.is_err());
+        }
+        let _ = state.update(Message::LoginSettingsSaved(Err("write failed".into())));
+        assert!(state.has_microsoft_app());
+        assert_eq!(state.config.as_ref().unwrap().client_id, changed.client_id);
+        assert_eq!(read_login_settings(&path).unwrap().unwrap(), changed);
+        assert!(state.settings_notice.contains("write failed"));
+        assert!(!state.busy);
+        // Corrupt settings must be reported rather than silently overridden by defaults.
+        tokio::fs::write(&path, "invalid json").await.unwrap();
+        let broken = State::from_directory(directory);
+        assert!(!broken.has_microsoft_app());
+        assert!(broken.settings_notice.contains("读取失败"));
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[test]
+    fn login_settings_cannot_change_during_login_or_save() {
+        let mut state = State::default();
+        let original = state.login_settings.clone();
+        state.busy = true;
+        let _ = state.update(Message::ClientId("changed".into()));
+        let _ = state.update(Message::RedirectUri(
+            "http://localhost:5000/callback".into(),
+        ));
+        assert_eq!(state.login_settings, original);
+        assert_eq!(state.update(Message::SaveLoginSettings).units(), 0);
+    }
 
     #[test]
     fn index_deduplicates_accounts_and_reconciles_removed_selection() {

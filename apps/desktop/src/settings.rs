@@ -7,7 +7,8 @@ use iced::widget::{button, column, container, pick_list, row, scrollable, text_i
 use iced::{Alignment, Color, Fill, Length};
 use std::time::Instant;
 
-const TABS: [&str; 7] = [
+pub const LOGIN_TAB: usize = 7;
+const TABS: [&str; 8] = [
     "常规",
     "游戏设置",
     "下载安装",
@@ -15,6 +16,7 @@ const TABS: [&str; 7] = [
     "AI 设置",
     "界面外观",
     "高级设置",
+    "账户登录",
 ];
 const LANGUAGES: [&str; 3] = [
     "简体中文 (Chinese)",
@@ -132,6 +134,10 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
             ("AI 设置 / 模型 / API / MCP", 4),
             ("界面外观 / 壁纸 / 主题 / 缩放", 5),
             ("高级设置 / 日志 / 诊断", 6),
+            (
+                "账户登录 / Microsoft / 微软 / 客户端 ID / Client ID / 回调地址",
+                LOGIN_TAB,
+            ),
         ];
         let mut results = column![].spacing(10);
         let mut found = false;
@@ -213,6 +219,8 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
         .spacing(12)
         .height(Fill)
         .into()
+    } else if state.tab == LOGIN_TAB {
+        motion::pop(login_settings(app), cards, true)
     } else if state.tab == 3 {
         motion::pop(
             container(
@@ -294,7 +302,15 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
             .spacing(16)
             .align_y(Alignment::End),
             tabs,
-            label(state.notice, 10.).color(MUTED),
+            label(
+                if state.tab == LOGIN_TAB {
+                    "Microsoft 登录配置保存在本机，保存后立即生效。"
+                } else {
+                    state.notice
+                },
+                10.
+            )
+            .color(MUTED),
             body,
         ]
         .spacing(12)
@@ -304,6 +320,64 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
     .width(Fill)
     .height(Fill)
     .into()
+}
+
+fn login_settings(app: &Launcher) -> Element<'_, AppMessage> {
+    use crate::accounts::Message as AccountMessage;
+    let accounts = &app.accounts;
+    let content = column![
+        bold("Microsoft 登录应用", 24.),
+        label("填写应用概述页的应用程序（客户端）ID，保存一次即可。", 13.).color(MUTED),
+        label("客户端 ID", 14.),
+        text_input(
+            "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            &accounts.login_settings.client_id
+        )
+        .on_input_maybe(
+            (!accounts.busy && !app.launching)
+                .then_some(|value| AppMessage::Accounts(AccountMessage::ClientId(value)))
+        )
+        .padding(12),
+        label("回调地址（与 Microsoft 应用注册保持一致）", 14.),
+        text_input(
+            "http://localhost:53682/oauth/callback",
+            &accounts.login_settings.redirect_uri
+        )
+        .on_input_maybe(
+            (!accounts.busy && !app.launching)
+                .then_some(|value| AppMessage::Accounts(AccountMessage::RedirectUri(value)))
+        )
+        .padding(12),
+        row![
+            button(label(
+                if accounts.settings_saving {
+                    "正在保存…"
+                } else {
+                    "保存登录配置"
+                },
+                14.
+            ))
+            .on_press_maybe(
+                (!accounts.busy && !app.launching)
+                    .then_some(AppMessage::Accounts(AccountMessage::SaveLoginSettings))
+            )
+            .padding(12)
+            .style(theme::action),
+            button(label("管理账户", 14.))
+                .on_press(AppMessage::Profile)
+                .padding(12)
+                .style(theme::quiet),
+        ]
+        .spacing(12),
+        label(&accounts.settings_notice, 13.).color(MUTED),
+    ]
+    .spacing(16);
+    container(scrollable(content).direction(theme::scroll_direction()))
+        .padding(24)
+        .width(Fill)
+        .height(Fill)
+        .style(theme::panel)
+        .into()
 }
 
 fn panel<'a>(
@@ -403,6 +477,9 @@ fn account(app: &Launcher) -> Element<'_, AppMessage> {
         .spacing(8)
         .align_y(Alignment::Center),
         label("数据管理", 10.).color(MUTED),
+        button(label("Microsoft 登录配置", 11.))
+            .style(theme::quiet)
+            .on_press(AppMessage::LoginSettings),
         action(
             Icon::Download,
             "备份与恢复",

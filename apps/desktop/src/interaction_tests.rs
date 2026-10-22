@@ -106,6 +106,41 @@ async fn launch_without_an_account_opens_account_management() {
 }
 
 #[tokio::test]
+async fn microsoft_settings_are_reachable_from_account_dialog_and_clickable_at_both_sizes() {
+    use crate::accounts::{AccountIndex, Message as AccountMessage};
+    let mut app = populated().await;
+    let _ = app.update(Message::Accounts(AccountMessage::Loaded(Ok(
+        AccountIndex::default(),
+    ))));
+    let _ = app.update(Message::Profile);
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::OPEN_DURATION,
+    ));
+    for message in click(&mut app, "配置 Microsoft 登录") {
+        let _ = app.update(message);
+    }
+    assert_eq!(app.page, Page::Settings);
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    let _ = app.update(Message::Accounts(AccountMessage::ClientId(
+        "12345678-1234-1234-1234-123456789abc".into(),
+    )));
+    for size in [Size::new(1024., 680.), Size::new(1536., 921.)] {
+        app.viewport = size;
+        assert!(click(&mut app, "账户登录")
+            .iter()
+            .any(|m| matches!(m, Message::Settings(_))));
+        assert!(click(&mut app, "保存登录配置")
+            .iter()
+            .any(|m| matches!(m, Message::Accounts(AccountMessage::SaveLoginSettings))));
+        assert!(click(&mut app, "管理账户")
+            .iter()
+            .any(|m| matches!(m, Message::Profile)));
+    }
+}
+
+#[tokio::test]
 async fn sidebar_clicks_route_from_every_page_at_both_sizes() {
     let mut app = populated().await;
     for size in [Size::new(1024., 680.), Size::new(1536., 921.)] {

@@ -1,0 +1,7 @@
+# README hero artwork
+
+`readme-hero.png` is an AI-generated branding illustration created using the built-in imagegen tool. It is not an application screenshot or a captured game scene. It does not imply endorsement or API approval from Microsoft or Mojang Studios.
+
+Generation prompt:
+
+> Use case: stylized-concept. Asset type: wide GitHub README hero banner for the existing project Memoria Launcher. Create a polished original 3D voxel landscape at dusk, approximately 3:1 panoramic banner composition. The product is an independent Rust desktop launcher for Minecraft Java Edition. Deep navy and dark teal atmosphere, restrained mint/emerald light, stepped grassy terrain, pine forest, distant cubic mountains and a warm small horizon glow; elegant and calm developer-tool branding, clean high-quality rendering with subtle depth. Left side has plenty of quiet dark negative space with large crisp white sans-serif text exactly 'Memoria Launcher', beneath it small text exactly 'Minecraft Java Edition Launcher'. Right side contains the landscape and a subtle abstract glowing rectangular gateway suggesting launching worlds. No screenshots or fake application UI. Keep text within generous safe margins and legible at README width. No official Minecraft wordmark, no Microsoft or Mojang logos, no characters, no approval seals, no marketing claims, no extra text, no watermarks. Opaque background.

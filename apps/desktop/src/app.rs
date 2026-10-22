@@ -110,6 +110,7 @@ pub enum Message {
     Maximize,
     Close,
     Profile,
+    LoginSettings,
     Settings(crate::settings::Message),
     Download(crate::download::Message),
     Ai(crate::ai::Message),
@@ -437,6 +438,13 @@ impl Launcher {
             Message::Maximize => return window::latest().and_then(window::toggle_maximize),
             Message::Close => return iced::exit(),
             Message::Profile => self.open_modal(Modal::Profile),
+            Message::LoginSettings => {
+                self.settings.update(
+                    crate::settings::Message::Tab(crate::settings::LOGIN_TAB),
+                    self.animation_time,
+                );
+                return self.update(Message::Navigate(Page::Settings));
+            }
             Message::Settings(message) => {
                 self.animation_time = Instant::now().max(self.animation_time);
                 self.settings.update(message, self.animation_time);

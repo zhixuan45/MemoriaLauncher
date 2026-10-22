@@ -14,7 +14,9 @@ Environment settings are saved to `%LOCALAPPDATA%\MemoriaLauncher\environment.js
 
 The core already implements PKCE authorization, Minecraft ownership checks, and token refresh. The desktop now supplies browser opening, a loopback HTTP callback, account selection, persistence, and logout.
 
-Release builds embed the publisher's application ID through `MEMORIA_MICROSOFT_CLIENT_ID` at build time; players only click the Microsoft login button. Developers can override the embedded ID at runtime, with the matching redirect URI:
+For a locally registered application, open **设置 → 账户登录**, enter the application client ID and matching callback URI, and click **保存登录配置**. The configuration takes effect immediately and is reloaded after restart from `microsoft-login.json` in the launcher data directory. The account dialog's **配置 Microsoft 登录** button opens this page. Invalid input and save failures preserve the last active configuration. Changing the client ID requires signing in existing accounts again.
+
+Saved local configuration takes priority over runtime environment variables, which take priority over the publisher's ID embedded through `MEMORIA_MICROSOFT_CLIENT_ID` at build time. Release builds can still embed the publisher's ID so players only click the Microsoft login button. Without saved local configuration, developers can also configure the application at runtime:
 
 ```powershell
 $env:MC_LAUNCHER_CLIENT_ID = "your-application-client-id"

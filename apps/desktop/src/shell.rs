@@ -296,6 +296,11 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
         }
         Modal::Profile => {
             content = content.push(label(&app.accounts.notice, 13.).color(MUTED));
+            content = content.push(
+                button(label("配置 Microsoft 登录", 13.))
+                    .style(theme::quiet)
+                    .on_press(Message::LoginSettings),
+            );
             for account in &app.accounts.index.accounts {
                 let selected = Some(&account.id) == app.accounts.index.active.as_ref();
                 content = content.push(
