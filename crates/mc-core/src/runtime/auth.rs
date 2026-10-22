@@ -191,7 +191,7 @@ where
         redirect_url: &str,
     ) -> LauncherResult<AuthAccount> {
         // Reject lookalike callbacks before parsing the authorization code or making network calls.
-        if !redirect_url.strip_prefix(&self.config.redirect_uri)
+        if !redirect_url.strip_prefix(self.config.redirect_uri.as_str())
             .is_some_and(|suffix| suffix.starts_with('?')) {
             return Err(LauncherError::AuthUnavailable(
                 "OAuth 回调地址与当前应用配置不一致".into(),
