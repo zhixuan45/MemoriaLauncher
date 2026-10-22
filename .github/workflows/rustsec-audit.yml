@@ -37,3 +37,12 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Fail on RustSec vulnerabilities
         run: cargo audit
+
+  archive_regression_tests:
+    name: ZIP symlink regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test archive path protections
+        run: cargo test -p mc-launcher-core security_tests --locked
