@@ -6,12 +6,33 @@ iced 桌面端的侧边栏玩家档案与「设置 → 常规 → 账户与数�
 
 **注意：当前桌面实例列表是 MockInstanceService 的示例数据，真实游戏启动按钮仍未接入。** 本次 PR 只打通桌面认证与账号管理，不宣称可启动正版游戏。底层 `GameLauncher` 已有 `AuthProvider` 接口，未来替换示例实例服务时应传入所选账号 ID，并在 `prepare` 时调用 `minecraft_session` 获取刷新后的临时游戏 token。
 
-## 初次使用
+## 面向玩家：一键登录
 
-1. 在 Microsoft Entra 应用注册中创建支持**个人 Microsoft 账户**的公共客户端应用，并配置 **Mobile and desktop applications** 的回调 URL `http://localhost:53682/oauth/callback`（或者与启动器填写的 URL 相同）。应启用公共客户端流程；不要将 client secret 写入客户端。
-2. 打开启动器侧边栏「未登录」或「设置 → 常规 → 管理账户」，输入你的 **Application (client) ID**。或者启动前设置环境变量 `MC_LAUNCHER_CLIENT_ID`。回调地址默认为 `http://localhost:53682/oauth/callback`，可通过 `MC_LAUNCHER_REDIRECT_URI` 更改，也可在弹窗内调整。
-3. 点击「使用浏览器登录 Microsoft」，在默认浏览器完成授权。浏览器访问本机回调页后，返回启动器查看结果。必须使用有 Minecraft Java 版有效权益及 Java 玩家档案的 Microsoft 账户。
-4. 若端口被占用或被防火墙阻挡，请使用另一个空闲端口，确保应用注册及启动器中的回调地址一致。单次授权最多等待 3 分钟。
+安装由 Memoria Launcher 发行方提供的正式构建，打开侧边栏账号管理，点击 **「使用 Microsoft 登录」**，在系统默认浏览器完成 Microsoft 授权；本机回调会让启动器自动完成 Minecraft Java 正版权益及档案验证。
+
+普通玩家 **不需要注册 Azure/Entra 应用，也不用提供客户端 ID 或回调 URI**。首次认证仍需在微软官方页面确认身份、可能需要同意权限。当前账号凭据还只保存在内存中，重启后须再次授权，待后续接入操作系统安全凭据存储。
+
+## 面向发行方：只注册一次应用
+
+1. 在 [Microsoft Entra 应用注册](https://entra.microsoft.com/) 创建应用，支持个人 Microsoft 账户，选择 **Mobile and desktop applications（公共客户端）**；根据 Entra 的当前要求，为系统浏览器注册 `http://localhost`，如果环境允许也可配置与程序一致的 `http://localhost:53682/oauth/callback`。注意：回调 URI 的路径仍需和实际请求一致；`localhost` 端口匹配在 Entra 中有特殊规则。启用公共客户端流程。不能使用 client secret 嵌入桌面应用。
+2. 记录这 **一个** 应用的 Application (client) ID，构建 Memoria Launcher 时通过环境变量 `MEMORIA_MICROSOFT_CLIENT_ID` 注入。例如：
+
+   ```sh
+   MEMORIA_MICROSOFT_CLIENT_ID=your-registered-client-id cargo build -p desktop --release
+   ```
+
+   PowerShell 示例：
+
+   ```powershell
+   $env:MEMORIA_MICROSOFT_CLIENT_ID = "your-registered-client-id"
+   cargo build -p desktop --release
+   ```
+
+3. 在自动打包流水线（GitHub Actions 等）中，把 `MEMORIA_MICROSOFT_CLIENT_ID` 设置成仓库变量并传入 **编译步骤**。Client ID 是公共标识符，不需要保存为密码；**不要**把 Microsoft client secret 放在发行包或 GitHub 仓库里。
+4. 将已嵌入 ID 的构建发布给玩家。玩家无需填写任何配置。**当前仓库未附带真实 Microsoft 应用 ID，因此未经发行方配置的普通构建会禁用登录按钮并提示发行方配置缺失。**
+
+**开发者专用覆盖：** 本机测试可用运行时环境变量 `MC_LAUNCHER_CLIENT_ID` 暂时覆盖嵌入的客户端 ID；`MC_LAUNCHER_REDIRECT_URI` 可以覆盖回调。普通玩家没有这些设置入口。固定本机端口默认为 `53682`，端口冲突时仅开发者可改动并确保与应用注册要求一致。
+
 
 ## 安全边界与限制
 
@@ -20,7 +41,7 @@ iced 桌面端的侧边栏玩家档案与「设置 → 常规 → 账户与数�
 - 认证结果必须经 Minecraft Services 权益及 Java profile 端点验证；昵称不是正版身份凭据。
 - **refresh token 只保存在当前启动器进程内存中，没有磁盘持久化。** 关闭并重新打开启动器后必须重新登录。后续应接入 Windows Credential Manager / macOS Keychain / Linux Secret Service，并单独处理跨平台安全存储和账号恢复。
 - 登出操作清理进程内保存的 refresh token，不撤销微软服务器上的全部会话；服务器端撤销需走 Microsoft 账号的应用权限管理。
-- 客户端 ID 是公共标识符，不是客户端密钥；请使用项目自己的 Microsoft 应用注册。依靠未经批准的客户端 ID 可能导致 Minecraft Services 拒绝认证。
+- 客户端 ID 是公共标识符，不是客户端密钥；应使用 Memoria 自己注册并管理的 Microsoft 应用 ID；不能借用其他启动器应用的 ID。Minecraft Services/Xbox Live 对应用的授权或资格要求也必须单独满足。
 - 目前没有完整集成测试可使用真实的微软账号与 Minecraft 游戏权益；需要在开发机上实际完成一次登录和令牌刷新、检查 OAuth 应用注册配置。
 
 ## 本地检查
