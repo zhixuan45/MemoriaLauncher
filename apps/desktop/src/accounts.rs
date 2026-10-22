@@ -111,8 +111,9 @@ impl State {
                 if let Some(config) = self.configurations.get(&id).cloned() {
                     self.busy = true;
                     let provider = MicrosoftAuthProvider::new(config, self.credentials.clone());
+                    let logout_id = id.clone();
                     return Task::perform(
-                        async move { provider.logout(&id).await.map_err(|e| e.to_string()) },
+                        async move { provider.logout(&logout_id).await.map_err(|e| e.to_string()) },
                         move |result| Message::LogoutFinished(id.clone(), result),
                     );
                 }
@@ -158,7 +159,7 @@ impl Callback {
         }
         let port = port.parse::<u16>().map_err(|_| "OAuth 回调端口无效。")?;
         if port == 0 || remainder.is_empty()
-            || remainder.contains(['?', '#', '\\'])
+            || remainder.chars().any(|c| c == '?' || c == '#' || c == '\\u{5c}')
             || remainder.contains("..")
         {
             return Err("OAuth 回调路径或端口无效。".into());
