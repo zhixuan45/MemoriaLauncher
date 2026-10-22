@@ -167,11 +167,13 @@ impl Callback {
         Ok(Self { port, path: format!("/{remainder}"), redirect_uri: uri.into() })
     }
 
-    fn accepts(&self, target: &str) -> bool {
+    fn accepts(&self, target: &str, expected_state: &str) -> bool {
         target.split_once('?').is_some_and(|(path, query)| {
-            path == self.path && query.split('&').any(|part| {
-                part.starts_with("code=") || part.starts_with("error=")
-            })
+            path == self.path
+                && query.split('&').any(|part| part == format!("state={expected_state}"))
+                && query.split('&').any(|part| {
+                    part.starts_with("code=") || part.starts_with("error=")
+                })
         })
     }
 }
@@ -195,7 +197,7 @@ async fn browser_login(
                 .and_then(|line| line.strip_prefix("GET "))
                 .and_then(|line| line.split_once(' ').map(|(target, _)| target))
                 .unwrap_or("");
-            let accepted = callback.accepts(target);
+            let accepted = callback.accepts(target, &login.state);
             let response = if accepted {
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n<!doctype html><meta charset=\"utf-8\"><title>Memoria Launcher</title><p>授权回调已收到，可返回 Memoria Launcher 查看登录结果。</p>"
             } else {
@@ -242,10 +244,11 @@ mod tests {
     fn only_loopback_callbacks_with_an_explicit_port_are_accepted() {
         let callback = Callback::parse("http://localhost:53682/oauth/callback").unwrap();
         assert_eq!(callback.port, 53682);
-        assert!(callback.accepts("/oauth/callback?code=abc&state=xyz"));
-        assert!(callback.accepts("/oauth/callback?error=access_denied"));
-        assert!(!callback.accepts("/oauth/callback/evil?code=abc"));
-        assert!(!callback.accepts("/oauth/callback?state=xyz"));
+        assert!(callback.accepts("/oauth/callback?code=abc&state=xyz", "xyz"));
+        assert!(callback.accepts("/oauth/callback?error=access_denied&state=xyz", "xyz"));
+        assert!(!callback.accepts("/oauth/callback/evil?code=abc&state=xyz", "xyz"));
+        assert!(!callback.accepts("/oauth/callback?state=xyz", "xyz"));
+        assert!(!callback.accepts("/oauth/callback?error=access_denied&state=wrong", "xyz"));
         assert!(Callback::parse("https://example.org/oauth/callback").is_err());
         assert!(Callback::parse("http://0.0.0.0:53682/oauth/callback").is_err());
         assert!(Callback::parse("http://localhost:0/oauth/callback").is_err());
