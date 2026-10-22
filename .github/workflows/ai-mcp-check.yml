@@ -1,0 +1,31 @@
+name: AI MCP checks
+
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "crates/mc-core/**"
+      - "crates/mc-mcp/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ai-mcp-check.yml"
+  push:
+    branches: [master]
+    paths:
+      - "apps/desktop/**"
+      - "crates/mc-core/**"
+      - "crates/mc-mcp/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ai-mcp-check.yml"
+
+jobs:
+  rust-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check changed crates
+        run: cargo check --locked -p mc-core -p mc-mcp -p desktop
+      - name: Read-only MCP and core tests
+        run: cargo test --locked -p mc-mcp -p mc-core

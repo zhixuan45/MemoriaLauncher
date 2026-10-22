@@ -9,6 +9,8 @@ tokio = { workspace = true }
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "x11", "wayland", "image-without-codecs", "svg", "tokio", "advanced-shaping"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "query", "rustls-no-provider"] }
+serde_json = { workspace = true }
+
 [dev-dependencies]
 iced_test = "0.14"
-

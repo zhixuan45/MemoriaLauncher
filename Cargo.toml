@@ -2,6 +2,7 @@
 members = [
     "crates/mc-core",
     "apps/desktop",
+    "crates/mc-mcp",
 ]
 resolver = "2"
 

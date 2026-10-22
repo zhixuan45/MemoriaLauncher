@@ -17,3 +17,5 @@ regex = "1.13"
 sha1 = "0.10"
 zip = { version = "6", default-features = false, features = ["deflate"] }
 mc-launcher-core = { path = "../vendor/mc-launcher-core" }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "query", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

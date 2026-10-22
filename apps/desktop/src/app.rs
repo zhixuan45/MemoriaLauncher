@@ -349,7 +349,7 @@ impl Launcher {
             Message::Download(message) => {
                 return self.download.update(message).map(Message::Download)
             }
-            Message::Ai(message) => self.ai.update(message),
+            Message::Ai(message) => return self.ai.update(message).map(Message::Ai),
             Message::Capture => {
                 return window::latest()
                     .and_then(window::screenshot)
