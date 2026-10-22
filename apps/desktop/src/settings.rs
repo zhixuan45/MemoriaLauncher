@@ -320,27 +320,22 @@ fn locale(state: &State) -> Element<'_, AppMessage> {
 }
 
 fn account(app: &Launcher) -> Element<'_, AppMessage> {
+    let current = app.accounts.active();
     column![
         label("当前账户", 10.).color(MUTED),
         row![
             icon(Icon::Gamepad, GREEN, 30.),
             column![
-                bold(
-                    if app.profile == 0 {
-                        "Steve_AI"
-                    } else {
-                        "Alex_Builder"
-                    },
-                    13.
-                ),
-                label("离线示例档案", 9.).color(MUTED),
-            ]
-            .spacing(4)
-            .width(Fill),
-            button(label("更换账户", 10.))
+                bold(current.map(|a| a.username.as_str()).unwrap_or("未登录"), 13.),
+                label(
+                    if current.is_some() { "已验证的 Microsoft 正版账户" } else { "未登录 Minecraft 正版账户" },
+                    9.
+                ).color(MUTED),
+            ].spacing(4).width(Fill),
+            button(label("管理账户", 10.))
                 .padding(7)
                 .style(theme::quiet)
-                .on_press(AppMessage::CycleProfile),
+                .on_press(AppMessage::Profile),
         ]
         .spacing(8)
         .align_y(Alignment::Center),
