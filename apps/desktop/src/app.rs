@@ -82,12 +82,13 @@ pub enum Message {
     Animate(Instant),
     Loaded(Result<crate::local::LocalData, String>),
     Accounts(crate::accounts::Message),
-    GameRoot(String),
-    JavaPath(String),
-    SaveEnvironment,
-    EnvironmentSaved(Result<crate::local::Environment, String>),
+    GameSettings(crate::game_settings::Message),
+    DownloadSettings(crate::download_settings::Message),
+    AiSettings(crate::ai_settings::Message),
     GameStarted(String),
-    GameFinished(Result<String, String>),
+    GameFinished(Result<crate::local::GameExit, String>),
+    AnalyzeCrash,
+    ShowCrash,
     Navigate(Page),
     SelectInstance(String),
     MoveInstance(String, i32),
@@ -140,13 +141,15 @@ pub struct Launcher {
     pub animation_time: Instant,
     pub accounts: crate::accounts::State,
     pub environment: crate::local::Environment,
-    pub game_root_input: String,
-    pub java_input: String,
+    pub game_settings: crate::game_settings::State,
+    pub download_settings: crate::download_settings::State,
     pub environment_saving: bool,
     pub launching: bool,
+    pub crash: Option<crate::local::GameExit>,
     pub settings: crate::settings::State,
     pub download: crate::download::State,
     pub ai: crate::ai::State,
+    pub ai_settings: crate::ai_settings::State,
     pub verification: verification::Verification,
 }
 
@@ -156,11 +159,17 @@ pub enum Modal {
     Changelog,
     Feature,
     Profile,
+    Crash,
 }
 
 impl Launcher {
     pub fn new() -> (Self, Task<Message>) {
         let (environment, environment_error) = crate::local::Environment::load();
+        let download_settings = crate::download_settings::State::load();
+        let download = crate::download::State::new(download_settings.saved.clone());
+        let ai_settings = crate::ai_settings::State::load();
+        let mut ai = crate::ai::State::default();
+        ai.connection = ai_settings.saved.clone();
         let now = Instant::now();
         let mut page_motion = Tween::new(0.0, now);
         page_motion.to(1.0, motion::PAGE_DURATION, now);
@@ -186,14 +195,16 @@ impl Launcher {
             modal_motion: Tween::new(0.0, now),
             animation_time: now,
             accounts: crate::accounts::State::default(),
-            game_root_input: environment.game_root.to_string_lossy().into_owned(),
-            java_input: environment.java.to_string_lossy().into_owned(),
+            game_settings: crate::game_settings::State::new(&environment),
+            download_settings,
             environment,
             environment_saving: false,
             launching: false,
+            crash: None,
             settings: crate::settings::State::default(),
-            download: crate::download::State::default(),
-            ai: crate::ai::State::default(),
+            download,
+            ai,
+            ai_settings,
             verification: verification::Verification::from_args(),
         };
         let task = Task::batch([state.load(), state.accounts.load().map(Message::Accounts)]);
@@ -260,6 +271,12 @@ impl Launcher {
                 if page == Page::Download {
                     return self.download.ensure_loaded().map(Message::Download);
                 }
+                if page == Page::Settings && self.settings.game_settings_visible() {
+                    return self
+                        .game_settings
+                        .ensure_java_loaded()
+                        .map(Message::GameSettings);
+                }
             }
             Message::SelectInstance(id) => {
                 if self.instances.iter().any(|i| i.instance.id == id) {
@@ -274,7 +291,11 @@ impl Launcher {
                 }
             }
             Message::Launch => {
-                if self.launching || self.loading || self.environment_saving {
+                if self.launching
+                    || self.loading
+                    || self.environment_saving
+                    || self.download.installing.is_some()
+                {
                     return Task::none();
                 }
                 let key = match self.current() {
@@ -284,7 +305,8 @@ impl Launcher {
                     }
                     Some(i) => i.instance.id.clone(),
                     None => {
-                        self.status = "暂无可启动的实例，请在环境配置中检查游戏目录。".into();
+                        self.status =
+                            "暂无可启动的实例，请在设置 → 游戏设置中检查实例集文件夹。".into();
                         return Task::none();
                     }
                 };
@@ -317,7 +339,33 @@ impl Launcher {
             Message::GameStarted(status) => self.status = status,
             Message::GameFinished(result) => {
                 self.launching = false;
-                self.status = result.unwrap_or_else(|e| format!("游戏启动或运行失败：{e}"));
+                match result {
+                    Ok(finished) => {
+                        self.status = finished.description();
+                        if !finished.exit.success {
+                            self.crash = Some(finished);
+                            self.open_modal(Modal::Crash);
+                        }
+                    }
+                    Err(error) => self.status = format!("游戏启动或退出监测失败：{error}"),
+                }
+            }
+            Message::AnalyzeCrash => {
+                if !self.ai.busy && !self.ai.loading_log {
+                    if let Some(crash) = self.crash.clone() {
+                        let navigation = self.update(Message::Navigate(Page::Ai));
+                        let analysis = self
+                            .ai
+                            .update(crate::ai::Message::AnalyzeCrash(crash), self.animation_time)
+                            .map(Message::Ai);
+                        return Task::batch([navigation, analysis]);
+                    }
+                }
+            }
+            Message::ShowCrash => {
+                if self.crash.is_some() {
+                    self.open_modal(Modal::Crash);
+                }
             }
             Message::Accounts(message) => {
                 if self.launching {
@@ -325,36 +373,50 @@ impl Launcher {
                 }
                 return self.accounts.update(message).map(Message::Accounts);
             }
-            Message::GameRoot(value) => self.game_root_input = value,
-            Message::JavaPath(value) => self.java_input = value,
-            Message::SaveEnvironment => {
-                if self.loading || self.environment_saving || self.launching {
-                    return Task::none();
-                }
-                if self.game_root_input.trim().is_empty() || self.java_input.trim().is_empty() {
-                    self.status = "游戏目录和 Java 路径不能为空。".into();
-                    return Task::none();
-                }
-                let config = crate::local::Environment {
-                    game_root: self.game_root_input.trim().into(),
-                    java: self.java_input.trim().into(),
+            Message::GameSettings(message) => {
+                let saved = match &message {
+                    crate::game_settings::Message::Saved(Ok(config)) => Some(config.clone()),
+                    _ => None,
                 };
-                self.environment_saving = true;
-                return Task::perform(
-                    async move { config.save().await.map(|_| config) },
-                    Message::EnvironmentSaved,
-                );
-            }
-            Message::EnvironmentSaved(result) => {
-                self.environment_saving = false;
-                match result {
-                    Ok(config) => {
-                        self.environment = config;
-                        self.loading = true;
-                        return self.load();
+                let task = self
+                    .game_settings
+                    .update(
+                        message,
+                        self.loading || self.launching || self.download.installing.is_some(),
+                    )
+                    .map(Message::GameSettings);
+                self.environment_saving = self.game_settings.busy;
+                if let Some(config) = saved {
+                    if !crate::local::same_root(&self.environment.game_root, &config.game_root) {
+                        // Version IDs are only unique within one collection.
+                        self.active.clear();
+                        self.instances.clear();
                     }
-                    Err(e) => self.status = format!("保存环境配置失败：{e}"),
+                    self.environment = config;
+                    self.loading = true;
+                    return Task::batch([task, self.load()]);
                 }
+                return task;
+            }
+            Message::DownloadSettings(message) => {
+                let saved = match &message {
+                    crate::download_settings::Message::Saved(Ok(config)) => Some(config.clone()),
+                    _ => None,
+                };
+                let task = self
+                    .download_settings
+                    .update(message)
+                    .map(Message::DownloadSettings);
+                if let Some(config) = saved {
+                    self.download.configure(config);
+                    if self.page == Page::Download {
+                        return Task::batch([
+                            task,
+                            self.download.ensure_loaded().map(Message::Download),
+                        ]);
+                    }
+                }
+                return task;
             }
             Message::EditInstance => self.open_modal(Modal::Instance),
             Message::Dismiss => self.dismiss_modal(),
@@ -448,9 +510,69 @@ impl Launcher {
             Message::Settings(message) => {
                 self.animation_time = Instant::now().max(self.animation_time);
                 self.settings.update(message, self.animation_time);
+                if self.page == Page::Settings && self.settings.game_settings_visible() {
+                    return self
+                        .game_settings
+                        .ensure_java_loaded()
+                        .map(Message::GameSettings);
+                }
             }
             Message::Download(message) => {
-                return self.download.update(message).map(Message::Download)
+                if let crate::download::Message::Install(id) = &message {
+                    if self.download.installing.is_some()
+                        || self.loading
+                        || self.environment_saving
+                        || self.launching
+                    {
+                        self.download.notice =
+                            "请等待当前扫描、保存、游戏运行或安装任务完成。".into();
+                        return Task::none();
+                    }
+                    if !self
+                        .download
+                        .versions
+                        .iter()
+                        .any(|version| &version.id == id)
+                    {
+                        self.download.notice = "请先从当前版本清单选择要安装的版本。".into();
+                        return Task::none();
+                    }
+                    let client = match &self.download.client {
+                        Ok(client) => client.clone(),
+                        Err(error) => {
+                            self.download.notice = error.clone();
+                            return Task::none();
+                        }
+                    };
+                    let id = id.clone();
+                    let _ = self.download.update(message);
+                    return crate::download::install(
+                        client,
+                        self.environment.game_root.clone(),
+                        id,
+                    )
+                    .map(Message::Download);
+                }
+                let refresh = matches!(&message, crate::download::Message::Installed(_, root, Ok(()))
+                    if crate::local::same_root(root, &self.environment.game_root));
+                let task = self.download.update(message).map(Message::Download);
+                if refresh && !self.loading {
+                    self.loading = true;
+                    return Task::batch([task, self.load()]);
+                }
+                return task;
+            }
+            Message::AiSettings(message) => {
+                let task = self.ai_settings.update(message).map(Message::AiSettings);
+                self.ai.connection = self.ai_settings.saved.clone();
+                return task;
+            }
+            Message::Ai(crate::ai::Message::OpenSettings) => {
+                self.settings.update(
+                    crate::settings::Message::Tab(crate::settings::AI_TAB),
+                    self.animation_time,
+                );
+                return self.update(Message::Navigate(Page::Settings));
             }
             Message::Ai(message) => {
                 self.animation_time = Instant::now().max(self.animation_time);
@@ -473,6 +595,12 @@ impl Launcher {
     pub fn subscription(&self) -> Subscription<Message> {
         let window = event::listen_with(window_event);
         let mut subscriptions = vec![window];
+        if self.page == Page::Settings && self.settings.game_settings_visible() {
+            subscriptions.push(
+                iced::time::every(std::time::Duration::from_secs(3))
+                    .map(|_| Message::GameSettings(crate::game_settings::Message::RefreshMemory)),
+            );
+        }
         if self.edit_layout && self.page == Page::Home && self.modal.is_none() {
             subscriptions.push(event::listen_with(layout_event));
         }

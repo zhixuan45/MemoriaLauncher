@@ -8,11 +8,12 @@ use tokio::{
     task::JoinHandle,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProcessExit {
     pub code: Option<i32>,
     pub success: bool,
     pub log_path: PathBuf,
+    pub log_error: Option<String>,
 }
 
 pub struct GameProcess {
@@ -36,17 +37,24 @@ impl GameProcess {
     /// 消费 stdout/stderr 的任务与 wait 并行运行，避免管道写满导致 Java 卡死。
     pub async fn wait(mut self) -> LauncherResult<ProcessExit> {
         let status = self.child.wait().await?;
+        let mut log_errors = Vec::new();
         for pump in self.pumps {
-            pump.await
-                .map_err(|e| LauncherError::Internal(e.to_string()))??;
+            match pump.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => log_errors.push(error.to_string()),
+                Err(error) => log_errors.push(error.to_string()),
+            }
         }
-        self.logger
-            .await
-            .map_err(|e| LauncherError::Internal(e.to_string()))??;
+        match self.logger.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log_errors.push(error.to_string()),
+            Err(error) => log_errors.push(error.to_string()),
+        }
         Ok(ProcessExit {
             code: status.code(),
             success: status.success(),
             log_path: self.log_path,
+            log_error: (!log_errors.is_empty()).then(|| log_errors.join("; ")),
         })
     }
 }
@@ -171,6 +179,78 @@ fn redact_chunk(input: &[u8], secrets: &[Vec<u8>], eof: bool) -> (Vec<u8>, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn real_process_exit_preserves_status_and_flushes_redacted_log() {
+        for code in [0, 7] {
+            let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/process-exit-tests")
+                .join(uuid::Uuid::new_v4().to_string());
+            tokio::fs::create_dir_all(&directory).await.unwrap();
+            #[cfg(windows)]
+            let (executable, arguments) = (
+                PathBuf::from("cmd.exe"),
+                vec![
+                    "/D".into(),
+                    "/C".into(),
+                    format!("echo secret-token & echo Error: fixture & exit /b {code}"),
+                ],
+            );
+            #[cfg(not(windows))]
+            let (executable, arguments) = (
+                PathBuf::from("sh"),
+                vec![
+                    "-c".into(),
+                    format!("printf 'secret-token\\nError: fixture\\n'; exit {code}"),
+                ],
+            );
+            let log_path = directory.join(".launcher/logs/run.log");
+            let process = spawn(LaunchPlan {
+                executable,
+                arguments,
+                game_directory: directory.clone(),
+                natives_directory: directory.join(".launcher/natives/run"),
+                log_path: log_path.clone(),
+                natives: vec![],
+                secrets: vec!["secret-token".into()],
+            })
+            .await
+            .unwrap();
+            let exit = tokio::time::timeout(std::time::Duration::from_secs(10), process.wait())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(exit.code, Some(code));
+            assert_eq!(exit.success, code == 0);
+            assert!(exit.log_error.is_none());
+            let text = tokio::fs::read_to_string(log_path).await.unwrap();
+            assert!(text.contains("Error: fixture"));
+            assert!(text.contains("[REDACTED]"));
+            assert!(!text.contains("secret-token"));
+        }
+    }
+
+    #[tokio::test]
+    async fn logging_failure_does_not_hide_abnormal_exit() {
+        #[cfg(windows)]
+        let child = Command::new("cmd.exe")
+            .args(["/D", "/C", "exit /b 9"])
+            .creation_flags(0x08000000)
+            .spawn()
+            .unwrap();
+        #[cfg(not(windows))]
+        let child = Command::new("sh").args(["-c", "exit 9"]).spawn().unwrap();
+        let process = GameProcess {
+            child,
+            log_path: "fixture.log".into(),
+            pumps: vec![],
+            logger: tokio::spawn(async { Err(std::io::Error::other("fixture log failure")) }),
+        };
+        let exit = process.wait().await.unwrap();
+        assert_eq!(exit.code, Some(9));
+        assert!(!exit.success);
+        assert!(exit.log_error.unwrap().contains("fixture log failure"));
+    }
 
     #[tokio::test]
     async fn redacts_secrets_across_chunks_without_waiting_for_newlines() {

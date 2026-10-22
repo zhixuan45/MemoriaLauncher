@@ -20,6 +20,15 @@ fn simulator<'a>(
 
 async fn populated() -> Launcher {
     let (mut app, _) = Launcher::new();
+    app.download_settings =
+        crate::download_settings::State::new(mc_core::DownloadSettings::default());
+    app.download = crate::download::State::default();
+    app.ai_settings = crate::ai_settings::State::new(Default::default());
+    app.ai = crate::ai::State::default();
+    app.game_settings.memory = crate::runtime_memory::MemorySnapshot {
+        total_mb: 32768,
+        available_mb: 24576,
+    };
     app.loading = false;
     app.status = "界面预览 · 实例与任务使用示例数据".into();
     app.instances = MockInstanceService::new()
@@ -56,6 +65,77 @@ fn click(app: &mut Launcher, target: &str) -> Vec<Message> {
     ui.click(target)
         .unwrap_or_else(|e| panic!("Cannot click {target}: {e}"));
     ui.into_messages().collect()
+}
+
+fn finished_game(success: bool) -> crate::local::GameExit {
+    crate::local::GameExit {
+        instance_id: "versions/crashed-instance".into(),
+        game_root: "unused-fixture".into(),
+        exit: mc_core::ProcessExit {
+            success,
+            code: Some(if success { 0 } else { 1 }),
+            log_path: "unused-fixture/versions/crashed-instance/.launcher/logs/run.log".into(),
+            log_error: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn abnormal_exit_offers_opt_in_analysis_of_the_exited_instance() {
+    for size in [Size::new(1440., 900.), Size::new(1024., 700.)] {
+        let mut app = populated().await;
+        app.viewport = size;
+        app.launching = true;
+        let _ = app.update(Message::GameFinished(Ok(finished_game(false))));
+        assert!(!app.launching);
+        assert_eq!(app.modal, Some(crate::app::Modal::Crash));
+        assert!(app.ai.crash_log.is_none());
+        assert!(!app.ai.busy);
+        let _ = app.update(Message::Animate(
+            app.animation_time + crate::motion::OPEN_DURATION,
+        ));
+        let messages = click(&mut app, "启用 AI 分析");
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, Message::AnalyzeCrash)));
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.page, Page::Ai);
+        assert!(app.ai.loading_log);
+        assert!(
+            !app.ai.busy,
+            "Reading a local log must not send an API request"
+        );
+        assert_ne!(app.crash.as_ref().unwrap().instance_id, app.active);
+    }
+}
+
+#[tokio::test]
+async fn normal_exit_and_launch_failure_do_not_offer_crash_analysis() {
+    let mut app = populated().await;
+    let _ = app.update(Message::GameFinished(Ok(finished_game(true))));
+    assert!(app.crash.is_none());
+    assert!(app.modal.is_none());
+    let _ = app.update(Message::GameFinished(Err("Java missing".into())));
+    assert!(app.crash.is_none());
+    assert!(app.modal.is_none());
+    assert!(app.status.contains("Java missing"));
+}
+
+#[tokio::test]
+async fn declining_crash_analysis_keeps_logs_unread() {
+    let mut app = populated().await;
+    let _ = app.update(Message::GameFinished(Ok(finished_game(false))));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::OPEN_DURATION,
+    ));
+    for message in click(&mut app, "暂不分析") {
+        let _ = app.update(message);
+    }
+    assert!(!app.ai.loading_log);
+    assert!(app.ai.crash_log.is_none());
+    assert!(!app.ai.busy);
 }
 
 #[tokio::test]
@@ -204,9 +284,7 @@ async fn download_and_settings_tabs_are_clickable_and_state_survives_navigation(
 async fn ai_request_reaches_the_runtime_and_retains_local_page_animation() {
     let mut app = populated().await;
     let _ = app.update(Message::Navigate(Page::Ai));
-    let _ = app.update(Message::Ai(crate::ai::Message::ApiModel(
-        "test-model".into(),
-    )));
+    app.ai.connection.config.model = "test-model".into();
     let _ = app.update(Message::Ai(crate::ai::Message::Prompt("配置建议".into())));
     let request = app.update(Message::Ai(crate::ai::Message::Submit));
     assert_eq!(request.units(), 1);
@@ -226,6 +304,63 @@ async fn ai_request_reaches_the_runtime_and_retains_local_page_animation() {
     assert_eq!(app.ai.reply.as_deref(), Some("模型建议"));
     assert!(!app.ai.busy);
     assert!(app.ai.tasks.is_empty());
+}
+
+#[tokio::test]
+async fn ai_settings_navigation_save_controls_and_application() {
+    use crate::ai_settings::{Connection, Message as SettingMessage};
+    let mut app = populated().await;
+    let _ = app.update(Message::Navigate(Page::Ai));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    for message in click(&mut app, "AI 设置") {
+        let _ = app.update(message);
+    }
+    assert_eq!(app.page, Page::Settings);
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
+        app.viewport = size;
+        assert!(click(&mut app, "保存并应用")
+            .iter()
+            .any(|m| matches!(m, Message::AiSettings(SettingMessage::Save))));
+        assert!(click(&mut app, "测试连接")
+            .iter()
+            .any(|m| matches!(m, Message::AiSettings(SettingMessage::Check))));
+    }
+    let _ = app.update(Message::AiSettings(SettingMessage::Model(
+        "unsaved-model".into(),
+    )));
+    assert!(app.ai.connection.config.model.is_empty());
+    let mut connection = Connection::default();
+    connection.config.model = "saved-model".into();
+    let _ = app.update(Message::AiSettings(SettingMessage::Saved(Ok(connection))));
+    assert_eq!(app.ai.connection.config.model, "saved-model");
+    let _ = app.update(Message::AiSettings(SettingMessage::Saved(Err(
+        "disk full".into()
+    ))));
+    assert_eq!(app.ai.connection.config.model, "saved-model");
+}
+
+#[tokio::test]
+#[ignore]
+async fn capture_ai_settings() {
+    let mut app = populated().await;
+    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
+    let _ = app.update(Message::Ai(crate::ai::Message::OpenSettings));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
+        app.viewport = size;
+        simulator(&app)
+            .snapshot(&crate::theme::launcher())
+            .unwrap()
+            .matches_image(format!("{dir}/ai-settings-{}.png", size.width))
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -356,7 +491,400 @@ async fn page_cards_settle_in_50ms_and_settings_reset_animates_switches() {
     assert!(!app.animating());
 }
 
-// Optional visual inspection, excluded from ordinary test runs.
+#[tokio::test]
+async fn game_settings_controls_work_at_minimum_window_size_and_drafts_survive_navigation() {
+    use crate::game_settings::Message as GameMessage;
+    let mut app = populated().await;
+    app.viewport = Size::new(1024., 680.);
+    let _ = app.update(Message::Navigate(Page::Settings));
+    for message in click(&mut app, "游戏设置") {
+        let _ = app.update(message);
+    }
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    let second = app
+        .environment
+        .game_root
+        .with_file_name(".minecraft-modpacks");
+    let _ = app.update(Message::GameSettings(GameMessage::Prepared(Ok((
+        second.clone(),
+        false,
+    )))));
+    for message in click(&mut app, "设为当前") {
+        assert!(matches!(
+            message,
+            Message::GameSettings(GameMessage::Select(1))
+        ));
+        let _ = app.update(message);
+    }
+    assert_eq!(app.game_settings.draft.game_root, second);
+    assert_ne!(
+        app.environment.game_root, second,
+        "draft must not affect launching before save"
+    );
+    let _ = app.update(Message::GameSettings(GameMessage::MemoryPercent(25)));
+    let _ = app.update(Message::Navigate(Page::Home));
+    let _ = app.update(Message::Navigate(Page::Settings));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    assert_eq!(app.game_settings.max_memory, "8192");
+    let messages = click(&mut app, "保存并应用");
+    assert!(messages
+        .iter()
+        .any(|message| matches!(message, Message::GameSettings(GameMessage::Save))));
+
+    let mut ui = simulator(&app);
+    ui.point_at((800., 500.));
+    ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+        delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -350. },
+    })]);
+    ui.click("检测 Java")
+        .expect("Java controls must be accessible after scrolling");
+    assert!(ui
+        .into_messages()
+        .any(|message| matches!(message, Message::GameSettings(GameMessage::CheckJava))));
+
+    let previous = app.environment.game_root.clone();
+    let _ = app.update(Message::GameSettings(GameMessage::Saved(Err(
+        "read-only".into()
+    ))));
+    assert_eq!(app.environment.game_root, previous);
+    let mut saved = app.game_settings.draft.clone();
+    saved.max_memory_mb = 8192;
+    let task = app.update(Message::GameSettings(GameMessage::Saved(Ok(saved))));
+    assert_eq!(task.units(), 1, "applying a collection must rescan it");
+    assert!(app.loading);
+    assert!(app.active.is_empty());
+    assert!(
+        app.instances.is_empty(),
+        "version IDs from a previous collection must not survive"
+    );
+    assert_eq!(app.environment.game_root, second);
+    assert_eq!(app.environment.launch_options().max_memory_mb, 8192);
+}
+
+#[tokio::test]
+#[ignore]
+async fn capture_game_settings() {
+    use crate::game_settings::Message as GameMessage;
+    let mut app = populated().await;
+    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
+    let _ = app.update(Message::Navigate(Page::Settings));
+    let _ = app.update(Message::Settings(crate::settings::Message::Tab(1)));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    let second = std::path::PathBuf::from("D:/Minecraft/Modpacks/.minecraft");
+    let _ = app.update(Message::GameSettings(GameMessage::Prepared(Ok((
+        second, false,
+    )))));
+    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
+        app.viewport = size;
+        simulator(&app)
+            .snapshot(&crate::theme::launcher())
+            .unwrap()
+            .matches_image(format!("{dir}/game-settings-{}.png", size.width))
+            .unwrap();
+        let mut ui = simulator(&app);
+        ui.point_at((800., 500.));
+        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -1200. },
+        })]);
+        ui.snapshot(&crate::theme::launcher())
+            .unwrap()
+            .matches_image(format!("{dir}/game-settings-bottom-{}.png", size.width))
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn memory_radio_buttons_and_ratio_slider_control_the_saved_launch_policy() {
+    use crate::game_settings::Message as GameMessage;
+    use crate::runtime_memory::MemoryMode;
+    let mut app = populated().await;
+    let _ = app.update(Message::Navigate(Page::Settings));
+    let _ = app.update(Message::Settings(crate::settings::Message::Tab(1)));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    let _ = app.update(Message::GameSettings(GameMessage::MemoryMode(
+        MemoryMode::Automatic,
+    )));
+    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
+        app.viewport = size;
+        let _ = app.update(Message::GameSettings(GameMessage::MemoryPercent(25)));
+        let _ = app.update(Message::GameSettings(GameMessage::MemoryMode(
+            MemoryMode::Automatic,
+        )));
+        let mut ui = simulator(&app);
+        ui.point_at((800., 500.));
+        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -2000. },
+        })]);
+        ui.click(iced_test::selector::id("memory-custom")).unwrap();
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            Message::GameSettings(GameMessage::MemoryMode(MemoryMode::Custom))
+        )));
+        for message in messages {
+            let _ = app.update(message);
+        }
+        let mut ui = simulator(&app);
+        ui.point_at((800., 500.));
+        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -2000. },
+        })]);
+        let slider = ui
+            .find(iced_test::selector::id("memory-ratio-slider"))
+            .unwrap()
+            .visible_bounds()
+            .unwrap();
+        ui.point_at((slider.x + slider.width * 0.6, slider.center_y()));
+        ui.simulate(iced_test::simulator::click());
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(messages.iter().any(|message| matches!(message, Message::GameSettings(GameMessage::MemoryPercent(value)) if (50..=58).contains(value))), "{size:?}: slider={slider:?}, messages={messages:?}");
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.game_settings.draft.memory_mode, MemoryMode::Custom);
+        assert!(app.game_settings.draft.memory_percent >= 50);
+        assert_ne!(
+            app.environment.memory_percent,
+            app.game_settings.draft.memory_percent
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn capture_java_and_memory_controls() {
+    use crate::game_settings::Message as GameMessage;
+    use crate::runtime_memory::MemoryMode;
+    let mut app = populated().await;
+    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
+    let mut runtimes = Vec::new();
+    for (index, (major, version)) in [
+        (26, "26.0.2"),
+        (21, "21.0.9"),
+        (21, "21.0.8"),
+        (17, "17.0.17"),
+        (17, "17.0.16"),
+        (8, "1.8.0_472"),
+        (8, "1.8.0_462"),
+        (17, "17.0.20"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        runtimes.push(mc_core::JavaRuntime {
+            executable: format!("C:/Program Files/Zulu/zulu-{major}-{index}/bin/java.exe").into(),
+            major_version: major,
+            version: version.into(),
+            arch: "amd64".into(),
+            os_version: "10.0".into(),
+        });
+    }
+    app.game_settings.java = runtimes[1].executable.to_string_lossy().into_owned();
+    app.game_settings.java_choices.clear();
+    let _ = app.update(Message::GameSettings(GameMessage::JavaScanned(Ok(
+        crate::java_environment::JavaDiscovery {
+            runtimes,
+            failures: Vec::new(),
+        },
+    ))));
+    let _ = app.update(Message::Navigate(Page::Settings));
+    let _ = app.update(Message::Settings(crate::settings::Message::Tab(1)));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
+        app.viewport = size;
+        for (name, mode) in [
+            ("auto", MemoryMode::Automatic),
+            ("custom", MemoryMode::Custom),
+        ] {
+            let _ = app.update(Message::GameSettings(GameMessage::MemoryMode(mode)));
+            if mode == MemoryMode::Custom {
+                let _ = app.update(Message::GameSettings(GameMessage::MemoryPercent(30)));
+            }
+            let mut ui = simulator(&app);
+            ui.point_at((800., 500.));
+            ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+                delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -2000. },
+            })]);
+            ui.snapshot(&crate::theme::launcher())
+                .unwrap()
+                .matches_image(format!("{dir}/memory-{name}-{}.png", size.width))
+                .unwrap();
+        }
+        let mut ui = simulator(&app);
+        ui.point_at((800., 500.));
+        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -300. },
+        })]);
+        ui.click(iced_test::selector::id("game-java-picker"))
+            .unwrap();
+        ui.snapshot(&crate::theme::launcher())
+            .unwrap()
+            .matches_image(format!("{dir}/java-dropdown-{}.png", size.width))
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn download_preferences_apply_to_the_client_and_controls_remain_accessible() {
+    use crate::download_settings::Message as SettingMessage;
+    use mc_core::{DownloadSettings, DownloadSource};
+    let mut app = populated().await;
+    let _ = app.update(Message::Navigate(Page::Settings));
+    for message in click(&mut app, "下载安装") {
+        let _ = app.update(message);
+    }
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
+        app.viewport = size;
+        for message in click(&mut app, "16") {
+            assert!(matches!(
+                message,
+                Message::DownloadSettings(SettingMessage::Parallel(_))
+            ));
+            let _ = app.update(message);
+        }
+        assert_eq!(app.download_settings.parallel, "16");
+        assert_eq!(
+            app.download
+                .client
+                .as_ref()
+                .unwrap()
+                .settings()
+                .parallel_downloads,
+            8
+        );
+        assert!(click(&mut app, "保存并应用")
+            .iter()
+            .any(|message| matches!(message, Message::DownloadSettings(SettingMessage::Save))));
+    }
+    let _ = app.update(Message::Navigate(Page::Home));
+    let _ = app.update(Message::Navigate(Page::Settings));
+    assert_eq!(app.download_settings.parallel, "16");
+    let config = DownloadSettings {
+        source: DownloadSource::Bmclapi,
+        parallel_downloads: 16,
+        ..Default::default()
+    };
+    let _ = app.update(Message::DownloadSettings(SettingMessage::Saved(Ok(
+        config.clone()
+    ))));
+    assert_eq!(app.download.client.as_ref().unwrap().settings(), &config);
+    assert_eq!(app.download_settings.saved, config);
+    let _ = app.update(Message::DownloadSettings(SettingMessage::Saved(Err(
+        "disk full".into(),
+    ))));
+    assert_eq!(
+        app.download
+            .client
+            .as_ref()
+            .unwrap()
+            .settings()
+            .parallel_downloads,
+        16
+    );
+    assert_eq!(
+        app.update(Message::Navigate(Page::Download)).units(),
+        1,
+        "saving a source must cause the catalogue to load through the new client"
+    );
+}
+
+#[tokio::test]
+async fn vanilla_install_uses_current_collection_and_rescans_only_after_success() {
+    use crate::download::Message as DownloadMessage;
+    let mut app = populated().await;
+    let version = app.download.versions[0].id.clone();
+    assert_eq!(
+        app.update(Message::Download(DownloadMessage::Install(version.clone())))
+            .units(),
+        1
+    );
+    assert_eq!(app.download.installing, Some(version.clone()));
+    assert_eq!(
+        app.update(Message::Download(DownloadMessage::Install(version.clone())))
+            .units(),
+        0
+    );
+    let before = app.game_settings.java.clone();
+    let _ = app.update(Message::GameSettings(crate::game_settings::Message::Java(
+        "different-java".into(),
+    )));
+    assert_eq!(
+        app.game_settings.java, before,
+        "collection settings are locked during installation"
+    );
+    let _ = app.update(Message::Download(DownloadMessage::InstallProgress(
+        mc_core::DownloadProgress {
+            completed: 2,
+            total: 4,
+            reused: 1,
+        },
+    )));
+    let _ = app.update(Message::Download(DownloadMessage::Installed(
+        version.clone(),
+        app.environment.game_root.clone(),
+        Err("hash mismatch".into()),
+    )));
+    assert!(app.download.installing.is_none());
+    assert!(!app.loading);
+    assert!(app.download.notice.contains("hash mismatch"));
+    let task = app.update(Message::Download(DownloadMessage::Installed(
+        version,
+        app.environment.game_root.clone(),
+        Ok(()),
+    )));
+    assert_eq!(task.units(), 1);
+    assert!(app.loading);
+}
+
+#[tokio::test]
+#[ignore]
+async fn capture_download_settings() {
+    use crate::download_settings::Message as SettingMessage;
+    let mut app = populated().await;
+    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
+    let _ = app.update(Message::Navigate(Page::Settings));
+    let _ = app.update(Message::Settings(crate::settings::Message::Tab(2)));
+    let _ = app.update(Message::Animate(
+        app.animation_time + crate::motion::PAGE_DURATION,
+    ));
+    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
+        app.viewport = size;
+        let _ = app.update(Message::DownloadSettings(SettingMessage::Source(
+            mc_core::DownloadSource::Bmclapi,
+        )));
+        simulator(&app)
+            .snapshot(&crate::theme::launcher())
+            .unwrap()
+            .matches_image(format!("{dir}/download-settings-{}.png", size.width))
+            .unwrap();
+        let _ = app.update(Message::DownloadSettings(SettingMessage::Source(
+            mc_core::DownloadSource::Custom,
+        )));
+        let mut ui = simulator(&app);
+        ui.point_at((800., 500.));
+        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -1200. },
+        })]);
+        ui.snapshot(&crate::theme::launcher())
+            .unwrap()
+            .matches_image(format!("{dir}/download-settings-custom-{}.png", size.width))
+            .unwrap();
+    }
+}
+
 #[tokio::test]
 #[ignore]
 async fn capture_pages() {

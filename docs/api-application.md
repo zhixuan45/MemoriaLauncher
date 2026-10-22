@@ -36,15 +36,16 @@ The client ID belongs to the application's maintainer. It may be embedded at bui
 | Access tokens | Used transiently for the identity/game service exchanges and authenticated game startup; excluded from serializable account records |
 | Java username and UUID | Stored locally in `accounts.json` to list and select accounts |
 | Application client ID and callback URI | Stored locally in `microsoft-login.json`; contains no account tokens or client secret |
-| Local game paths | Used for scanning and launching local installations; not sent to the optional AI provider |
-| AI API Key | User-supplied and retained only in the running desktop process; sent only to the configured compatible API endpoint |
+| Local game paths | Used for scanning and launching local installations; may appear in logs explicitly attached and sent by the user |
+| AI API Key | User-supplied in Settings > AI; persisted in Windows Credential Manager, referenced by ai.json; sent only to the configured compatible API endpoint |
 | AI prompt | Sent to the user-selected AI provider with target game version and output language; not accompanied by Microsoft/Minecraft credentials |
+| Instance logs | Read locally after the user enables crash analysis; sent to the configured AI provider only on explicit submission. MCP clients can request known log files within their configured game root. Common credential-bearing lines are redacted; player names, local paths and unrecognized sensitive formats may remain |
 
 Authenticated game startup passes the required session parameters to the Java game process. Game log forwarding redacts known session secrets. The current project does not provide a hosted account service or a credential-collection backend. Local logout deletes the launcher's credential entry; server-side consent revocation remains under the user's Microsoft account controls.
 
 ## Separation from AI / MCP
 
-The optional AI chat adapter returns text recommendations. It has no installer, shell or local filesystem tools. The separate MCP stdio server offers four read-only tools: Mojang version listing, local instance listing, Modrinth search, and Modrinth project metadata. The MCP server does not expose account tokens, Microsoft sign-in or game launching, and cannot apply installation changes.
+The optional AI chat adapter returns text recommendations and can receive a user-approved crash log attachment. It has no installer, shell or arbitrary filesystem tools. The separate MCP stdio server offers six read-only tools: Mojang version listing, local instance listing, Modrinth search, Modrinth project metadata, instance log listing, and bounded log reading. Log reads exclude credential storage files and redact common credential-bearing lines. The MCP server does not offer Microsoft sign-in or game launching, and cannot apply installation changes.
 
 ## Code locations for review
 

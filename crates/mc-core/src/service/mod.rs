@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod downloads;
 pub mod instance;
 pub mod online_catalog;
 pub mod task;

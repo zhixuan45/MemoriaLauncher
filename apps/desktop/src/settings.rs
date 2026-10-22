@@ -8,6 +8,7 @@ use iced::{Alignment, Color, Fill, Length};
 use std::time::Instant;
 
 pub const LOGIN_TAB: usize = 7;
+pub const AI_TAB: usize = 4;
 const TABS: [&str; 8] = [
     "常规",
     "游戏设置",
@@ -63,6 +64,9 @@ impl Default for State {
 }
 
 impl State {
+    pub fn game_settings_visible(&self) -> bool {
+        matches!(self.tab, 1 | 3) && self.query.trim().is_empty()
+    }
     pub fn animating(&self, now: Instant) -> bool {
         self.switches.iter().any(|toggle| toggle.active(now))
     }
@@ -128,10 +132,13 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
                 "常规 / 启动器行为 / 语言与地区 / 账户与数据 / 更新 / 快捷操作",
                 0,
             ),
-            ("游戏设置 / 内存 / 分辨率", 1),
-            ("下载安装 / 下载源 / 并行任务", 2),
-            ("环境配置 / Java / 运行环境", 3),
-            ("AI 设置 / 模型 / API / MCP", 4),
+            (
+                "游戏设置 / 实例集 / 文件夹 / 目录 / 内存 / Java / 运行环境",
+                1,
+            ),
+            ("下载安装 / 下载源 / 镜像 / BMCLAPI / 并行 / 并发 / 线程", 2),
+            ("环境配置", 3),
+            ("AI 设置 / 模型 / API / MCP / 密钥 / 地址 / 接口", AI_TAB),
             ("界面外观 / 壁纸 / 主题 / 缩放", 5),
             ("高级设置 / 日志 / 诊断", 6),
             (
@@ -221,37 +228,12 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
         .into()
     } else if state.tab == LOGIN_TAB {
         motion::pop(login_settings(app), cards, true)
-    } else if state.tab == 3 {
-        motion::pop(
-            container(
-                column![
-                    bold("游戏与 Java 环境", 24.),
-                    label("游戏根目录（包含 versions、libraries、assets）", 13.).color(MUTED),
-                    text_input("游戏根目录", &app.game_root_input)
-                        .on_input(AppMessage::GameRoot)
-                        .padding(12),
-                    label("Java 可执行文件路径，或 PATH 中的 java", 13.).color(MUTED),
-                    text_input("java", &app.java_input)
-                        .on_input(AppMessage::JavaPath)
-                        .padding(12),
-                    button(label("保存并重新扫描", 14.))
-                        .padding(12)
-                        .style(theme::action)
-                        .on_press_maybe(
-                            (!app.loading && !app.environment_saving && !app.launching)
-                                .then_some(AppMessage::SaveEnvironment)
-                        ),
-                    label(&app.status, 12.).color(MUTED),
-                ]
-                .spacing(16),
-            )
-            .padding(24)
-            .width(Fill)
-            .height(Fill)
-            .style(theme::panel),
-            cards,
-            true,
-        )
+    } else if state.tab == 1 || state.tab == 3 {
+        motion::pop(crate::game_settings::view(app), cards, true)
+    } else if state.tab == 2 {
+        motion::pop(crate::download_settings::view(app), cards, true)
+    } else if state.tab == AI_TAB {
+        motion::pop(crate::ai_settings::view(app), cards, true)
     } else {
         motion::pop(
             container(
@@ -305,6 +287,12 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
             label(
                 if state.tab == LOGIN_TAB {
                     "Microsoft 登录配置保存在本机，保存后立即生效。"
+                } else if state.tab == 1 || state.tab == 3 {
+                    "实例集、内存与 Java 配置保存在本机，点击保存并应用后生效。"
+                } else if state.tab == 2 {
+                    "下载源与并行下载数量保存在本机，保存后用于新的下载任务。"
+                } else if state.tab == AI_TAB {
+                    "AI 配置保存在本机，保存后用于后续咨询与日志分析。"
                 } else {
                     state.notice
                 },

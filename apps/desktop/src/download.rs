@@ -2,9 +2,15 @@
 use crate::assets::{icon, picture, Icon, ART};
 use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, WHITE};
-use iced::widget::{button, column, container, pick_list, row, scrollable, text_input, Space};
+use iced::widget::{
+    button, column, container, pick_list, progress_bar, row, scrollable, text_input, Space,
+};
 use iced::{Alignment, ContentFit, Fill, Length, Task};
-use mc_core::{CatalogProvider, GameVersion, GameVersionType, MojangCatalogProvider};
+use mc_core::{
+    DownloadClient, DownloadProgress, DownloadSettings, GameVersion, GameVersionType,
+    MojangCatalogProvider,
+};
+use std::path::PathBuf;
 
 pub const CATEGORIES: [&str; 5] = ["游戏版本", "Mod", "整合包", "资源包", "光影包"];
 const TYPES: [&str; 3] = ["全部版本", "正式版", "快照版"];
@@ -24,6 +30,9 @@ pub enum Message {
     Banner(i32),
     Install(String),
     Loaded(Result<Vec<GameVersion>, String>),
+    CatalogLoaded(u64, Result<Vec<GameVersion>, String>),
+    InstallProgress(DownloadProgress),
+    Installed(String, PathBuf, Result<(), String>),
     Retry,
 }
 
@@ -40,9 +49,18 @@ pub struct State {
     loader: &'static str,
     sort: &'static str,
     pub notice: String,
+    pub client: Result<DownloadClient, String>,
+    pub installing: Option<String>,
+    pub progress: Option<DownloadProgress>,
+    pub catalog_generation: u64,
 }
 impl Default for State {
     fn default() -> Self {
+        Self::new(DownloadSettings::default())
+    }
+}
+impl State {
+    pub fn new(config: DownloadSettings) -> Self {
         Self {
             category: 0,
             query: String::new(),
@@ -55,24 +73,47 @@ impl Default for State {
             version_type: TYPES[1],
             loader: LOADERS[0],
             sort: SORT[0],
-            notice: "Mojang 官方版本清单 · 安装服务尚未接入".into(),
+            notice: format!(
+                "下载源：{} · {} 个并行下载",
+                config.source, config.parallel_downloads
+            ),
+            client: DownloadClient::new(config).map_err(|e| e.to_string()),
+            installing: None,
+            progress: None,
+            catalog_generation: 0,
         }
     }
-}
-impl State {
+
+    pub fn configure(&mut self, config: DownloadSettings) {
+        self.client = DownloadClient::new(config.clone()).map_err(|e| e.to_string());
+        self.catalog_generation += 1;
+        self.loading = false;
+        self.loaded = false;
+        self.versions.clear();
+        self.selected = None;
+        if self.installing.is_none() {
+            self.notice = format!(
+                "下载源：{} · {} 个并行下载",
+                config.source, config.parallel_downloads
+            );
+        }
+    }
+
     pub fn ensure_loaded(&mut self) -> Task<Message> {
         if self.loading || self.loaded {
             return Task::none();
         }
         self.loading = true;
+        let client = self.client.clone();
+        let generation = self.catalog_generation;
         Task::perform(
-            async {
-                MojangCatalogProvider
-                    .list_game_versions()
+            async move {
+                let client = client?;
+                MojangCatalogProvider::list_with_client(&client)
                     .await
                     .map_err(|e| e.to_string())
             },
-            Message::Loaded,
+            move |result| Message::CatalogLoaded(generation, result),
         )
     }
     pub fn filtered(&self) -> Vec<&GameVersion> {
@@ -134,7 +175,32 @@ impl State {
                 self.banner = (self.banner as i32 + delta).rem_euclid(3) as usize
             }
             Message::Install(id) => {
-                self.notice = format!("{id}：安装服务尚未接入，未创建下载任务。")
+                self.installing = Some(id.clone());
+                self.progress = None;
+                self.notice = format!("{id}：正在读取版本信息并准备下载…");
+            }
+            Message::InstallProgress(progress) => {
+                self.notice = format!(
+                    "{} · 文件 {}/{} · 已复用 {} 个文件",
+                    self.installing.as_deref().unwrap_or("安装中"),
+                    progress.completed,
+                    progress.total,
+                    progress.reused
+                );
+                self.progress = Some(progress);
+            }
+            Message::Installed(id, _, result) => {
+                self.installing = None;
+                self.progress = None;
+                self.notice = match result {
+                    Ok(()) => format!("{id} 安装完成，可在主页选择此实例。"),
+                    Err(error) => format!("{id} 安装失败：{error}"),
+                };
+            }
+            Message::CatalogLoaded(generation, result) => {
+                if generation == self.catalog_generation {
+                    return self.update(Message::Loaded(result));
+                }
             }
             Message::Loaded(result) => {
                 self.loading = false;
@@ -143,21 +209,60 @@ impl State {
                         self.versions = versions;
                         self.loaded = true;
                         self.reconcile_selection();
-                        self.notice = format!(
-                            "已读取 {} 个官方版本 · 安装服务尚未接入",
-                            self.versions.len()
-                        );
+                        if self.installing.is_none() {
+                            self.notice = format!(
+                                "已读取 {} 个版本 · {}",
+                                self.versions.len(),
+                                self.client
+                                    .as_ref()
+                                    .map(|client| format!(
+                                        "下载源：{} · {} 个并行下载",
+                                        client.settings().source,
+                                        client.settings().parallel_downloads
+                                    ))
+                                    .unwrap_or_default()
+                            );
+                        }
                     }
                     Err(e) => self.notice = format!("读取目录失败：{e}"),
                 }
             }
             Message::Retry => {
+                if self.loading {
+                    return Task::none();
+                }
                 self.loaded = false;
                 return self.ensure_loaded();
             }
         }
         Task::none()
     }
+}
+
+pub fn install(client: DownloadClient, root: PathBuf, id: String) -> Task<Message> {
+    use iced::futures::SinkExt;
+    use std::sync::{Arc, Mutex};
+    Task::run(
+        iced::stream::channel(
+            8,
+            move |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
+                let sender = Arc::new(Mutex::new(output.clone()));
+                let progress = Arc::new(move |progress| {
+                    if let Ok(mut sender) = sender.lock() {
+                        let _ = sender.try_send(Message::InstallProgress(progress));
+                    }
+                });
+                let result = async {
+                    let layout = mc_core::GameLayout::new(&root)?;
+                    mc_core::install_vanilla(client, layout, id.clone(), progress).await
+                }
+                .await
+                .map_err(|e: mc_core::LauncherError| e.to_string());
+                let _ = output.send(Message::Installed(id, root, result)).await;
+            },
+        ),
+        |message| message,
+    )
 }
 
 fn tab_button<'a>(title: &'a str, active: bool, message: Message) -> Element<'a, Message> {
@@ -257,7 +362,9 @@ pub fn view(state: &State, cards: f32) -> Element<'_, Message> {
                     button(label("安装", 12.))
                         .padding([19, 12])
                         .style(theme::action)
-                        .on_press(Message::Install(v.id.clone()))
+                        .on_press_maybe(
+                            (state.installing.is_none()).then_some(Message::Install(v.id.clone()))
+                        )
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),
@@ -341,27 +448,33 @@ pub fn view(state: &State, cards: f32) -> Element<'_, Message> {
             true,
         )
     };
-    container(
-        column![
-            row![icon(Icon::Download, GREEN, 30.), bold("游戏下载", 32.)]
-                .spacing(12)
-                .align_y(Alignment::Center),
-            label("选择版本、Mod 或整合包，快速开始你的冒险", 14.).color(MUTED),
-            text_input("搜索游戏版本 / Mod / 整合包…", &state.query)
-                .on_input(Message::Search)
-                .padding(12)
-                .size(14),
-            categories,
-            label(&state.notice, 11.).color(MUTED),
-            body,
-        ]
-        .spacing(12)
-        .height(Fill),
-    )
-    .padding(22)
-    .width(Fill)
-    .height(Fill)
-    .into()
+    let mut content = column![
+        row![icon(Icon::Download, GREEN, 30.), bold("游戏下载", 32.)]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        label("选择版本、Mod 或整合包，快速开始你的冒险", 14.).color(MUTED),
+        text_input("搜索游戏版本 / Mod / 整合包…", &state.query)
+            .on_input(Message::Search)
+            .padding(12)
+            .size(14),
+        categories,
+        label(&state.notice, 11.).color(MUTED),
+    ]
+    .spacing(12);
+    if let Some(progress) = &state.progress {
+        content = content.push(
+            progress_bar(
+                0.0..=progress.total.max(1) as f32,
+                progress.completed as f32,
+            )
+            .girth(5),
+        );
+    }
+    container(content.push(body).height(Fill))
+        .padding(22)
+        .width(Fill)
+        .height(Fill)
+        .into()
 }
 
 fn version_kind(v: &GameVersion) -> &'static str {
@@ -455,7 +568,7 @@ fn details(state: &State) -> Element<'_, Message> {
         .padding(14)
         .width(Fill)
         .style(theme::action)
-        .on_press(Message::Install(v.id.clone())),
+        .on_press_maybe((state.installing.is_none()).then_some(Message::Install(v.id.clone()))),
         tabs,
         scrollable(content)
             .direction(theme::scroll_direction())
@@ -478,7 +591,7 @@ fn details(state: &State) -> Element<'_, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mc_core::MockCatalogProvider;
+    use mc_core::{CatalogProvider, MockCatalogProvider};
     #[tokio::test]
     async fn filters_reconcile_selection_and_empty_results() {
         let mut state = State::default();
@@ -498,5 +611,38 @@ mod tests {
             .filtered()
             .iter()
             .all(|v| v.version_type == GameVersionType::Snapshot));
+    }
+
+    #[tokio::test]
+    async fn applying_a_source_ignores_previous_inflight_catalogue_results() {
+        let mut state = State::default();
+        assert_eq!(state.ensure_loaded().units(), 1);
+        let previous = state.catalog_generation;
+        state.configure(DownloadSettings {
+            source: mc_core::DownloadSource::Bmclapi,
+            parallel_downloads: 3,
+            ..Default::default()
+        });
+        assert_eq!(state.ensure_loaded().units(), 1);
+        let versions = MockCatalogProvider::new()
+            .list_game_versions()
+            .await
+            .unwrap();
+        let _ = state.update(Message::CatalogLoaded(previous, Ok(versions.clone())));
+        assert!(state.versions.is_empty());
+        assert!(
+            state.loading,
+            "a stale reply must not settle the new request"
+        );
+        let _ = state.update(Message::CatalogLoaded(
+            state.catalog_generation,
+            Ok(versions),
+        ));
+        assert!(!state.loading);
+        assert!(!state.versions.is_empty());
+        assert_eq!(
+            state.client.as_ref().unwrap().settings().parallel_downloads,
+            3
+        );
     }
 }

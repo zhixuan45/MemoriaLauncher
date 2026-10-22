@@ -29,6 +29,11 @@ impl GameLayout {
         self.path("assets")
     }
 
+    /// Resolve a download destination with the same boundary checks as launching.
+    pub(crate) fn download_path(&self, relative: &str) -> LauncherResult<PathBuf> {
+        self.path(relative)
+    }
+
     pub(crate) fn path(&self, relative: impl AsRef<Path>) -> LauncherResult<PathBuf> {
         checked_join(&self.root, relative.as_ref())
     }

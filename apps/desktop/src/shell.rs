@@ -85,6 +85,14 @@ fn titlebar(app: &Launcher) -> Element<'_, Message> {
     .on_press(Message::DragWindow)
     .on_double_click(Message::Maximize);
     let mut controls = row![drag].align_y(Alignment::Center).spacing(6);
+    if app.crash.is_some() {
+        controls = controls.push(
+            button(label("异常退出记录", 10.))
+                .on_press(Message::ShowCrash)
+                .style(theme::quiet)
+                .padding([5, 8]),
+        );
+    }
     if app.page == Page::Home {
         if app.edit_layout || app.layouts.iter().any(|l| !l.visible) {
             controls = controls.push(
@@ -248,6 +256,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 Modal::Changelog => "更新日志",
                 Modal::Feature => "精选内容",
                 Modal::Profile => "账户管理",
+                Modal::Crash => "实例异常退出",
             },
             22.
         ),
@@ -257,6 +266,25 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
     .align_y(Alignment::Center)]
     .spacing(18);
     match modal {
+        Modal::Crash => {
+            if let Some(crash) = &app.crash {
+                content = content
+                    .push(label(crash.description(), 13.))
+                    .push(label("可以启用 AI 分析，帮助定位 Mod 冲突、Java 错误等可能原因。", 13.))
+                    .push(label("启用后会读取本次启动日志末尾并遮蔽常见凭据；在 AI 页点击发送后，日志才会发给你配置的服务。日志仍可能包含玩家名和本地路径。", 12.).color(MUTED))
+                    .push(row![
+                        button(label("启用 AI 分析", 13.))
+                            .on_press_maybe((!app.ai.busy && !app.ai.loading_log).then_some(Message::AnalyzeCrash))
+                            .style(theme::quiet).padding(10),
+                        button(label("暂不分析", 13.)).on_press(Message::Dismiss)
+                            .style(theme::quiet).padding(10),
+                    ].spacing(10));
+                if app.ai.busy || app.ai.loading_log {
+                    content =
+                        content.push(label("请等待当前 AI 请求或日志读取完成。", 12.).color(MUTED));
+                }
+            }
+        }
         Modal::Instance => {
             if let Some(i) = app.current() {
                 content = content

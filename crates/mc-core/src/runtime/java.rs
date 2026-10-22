@@ -9,6 +9,7 @@ use tokio::process::Command;
 pub struct JavaRuntime {
     pub executable: PathBuf,
     pub major_version: u32,
+    pub version: String,
     pub os_version: String,
     pub arch: String,
 }
@@ -56,6 +57,7 @@ impl JavaRuntime {
         Ok(Self {
             executable,
             major_version,
+            version,
             os_version: property("os.version").unwrap_or_default(),
             arch: property("os.arch").unwrap_or_else(|| std::env::consts::ARCH.into()),
         })

@@ -43,7 +43,7 @@ The previous application subscribed to every runtime input event, including ordi
 
 The desktop now scans local instances, persists Microsoft accounts using the Windows credential vault, launches through the existing core runtime, and reads Mojang's official version manifest. See [Desktop data sources](real-data-integration.md) for configuration and validation boundaries. Sample providers remain available as test fixtures.
 
-Mod/resource/shader catalogues, installation, attachment import, and AI execution remain unavailable. Their actions explain the missing service and never fabricate successful work. Environment/account configuration is persistent; other general switches retain their session-only behavior.
+Mod/resource/shader catalogues, third-party loader installation, attachment import, and AI execution remain unavailable. Their actions explain the missing service and never fabricate successful work. Vanilla installation now downloads verified files through the configured source and concurrency limit. Game/download/account configuration is persistent; other general switches retain their session-only behavior.
 
 ## Verification
 

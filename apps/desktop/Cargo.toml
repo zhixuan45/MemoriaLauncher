@@ -13,12 +13,19 @@ uuid = { workspace = true }
 url = "2.5"
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "x11", "wayland", "image-without-codecs", "svg", "tokio", "advanced-shaping", "advanced"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+rfd = { version = "0.14.1", default-features = false, features = ["xdg-portal", "tokio"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "query", "rustls-no-provider"] }
 
 [dev-dependencies]
 iced_test = "0.14"
 
+[build-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_WindowsProgramming"] }
 

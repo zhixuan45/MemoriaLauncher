@@ -15,15 +15,19 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | 功能 | 当前行为 |
 | --- | --- |
 | 本地游戏库 | 扫描 `versions/` 与兼容的 `version/` 目录，读取版本、加载器、Java 要求与客户端 JAR 状态 |
+| 游戏设置 | 多个实例集文件夹；检测 Java 并从下拉列表选择或手动导入；自动分配内存或按总内存比例拖动滑块，配置保存后用于实际启动 |
 | 账户管理 | 系统浏览器 Microsoft OAuth 授权码 + PKCE 登录，支持添加、切换与退出账户 |
 | 登录应用设置 | 在 **设置 → 账户登录** 填写客户端 ID 和回调地址，保存后立即生效，重启自动读取 |
 | 游戏启动 | 使用所选账户刷新并验证会话，检查 Java 与本地依赖，启动 Java 进程并显示日志路径与退出状态 |
+| 异常退出检测 | 非正常退出时提示启用 AI 分析；用户确认发送后才上传本次启动日志末尾，可移除附件 |
 | 官方版本目录 | 从 Mojang 官方版本清单读取真实版本、发布时间与元数据地址 |
+| 下载安装 | 下载原版客户端、依赖库、原生库与资源，校验 SHA-1，安装后自动扫描到当前实例集 |
+| 下载设置 | 官方、BMCLAPI 或自定义兼容镜像；支持 1–64 个并行下载，保存后新任务生效，重启保留 |
 | 本地统计 | 统计实例隔离目录内的 Mod JAR 数量；尚未记录的游玩时长显示“未记录” |
 | AI 对话 | 可选的 Chat Completions 兼容接口，由用户提供地址、模型与 API Key；不自动执行本地操作 |
-| MCP 服务 | 通过 stdio 查询 Mojang 版本、Modrinth 项目与本地实例，当前仅提供只读工具 |
+| MCP 服务 | 通过 stdio 查询 Mojang 版本、Modrinth 项目、本地实例及实例日志，当前仅提供只读工具 |
 
-**尚未完成：** 游戏下载与自动安装、桌面端第三方资源目录、AI 自动组包与汉化、安装变更审批与事务部署、非 Windows 系统的安全凭据存储。界面不会为这些功能生成虚构的成功结果或下载进度。
+**尚未完成：** 第三方加载器与整合包安装、桌面端第三方资源目录、AI 自动组包与汉化、安装变更审批与事务部署、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。界面不会为这些功能生成虚构的成功结果或下载进度。
 
 ## 本地运行
 
@@ -37,12 +41,31 @@ cargo run --locked -p desktop
 
 首次使用：
 
-1. 在 **设置 → 环境配置** 选择包含 `versions`、`libraries`、`assets` 的游戏根目录，填写 Java 路径，点击 **保存并重新扫描**。
+1. 在 **设置 → 游戏设置** 新建或导入实例集文件夹（如 `.minecraft`），支持管理多个文件夹。选择当前实例集，设置内存与 Java 路径，点击 **保存并应用**。
+   在 **设置 → 下载安装** 选择下载源及并行数量并保存；在 **游戏下载** 页面点击 **安装此版本**，将原版游戏安装到当前实例集。
 2. 如果构建尚未内置登录应用 ID，在 **设置 → 账户登录** 填写自己注册的 Microsoft 应用客户端 ID；默认回调为 `http://localhost:53682/oauth/callback`，应与应用注册一致。点击 **保存登录配置**，无需反复设置环境变量。
 3. 点击左下角账户区域，选择 **添加 Microsoft 账户**，在系统浏览器完成授权。
 4. 选择完整的本地实例，点击 **开始游戏**。Java、凭据或依赖问题会显示实际错误。
 
-普通玩家使用已配置应用 ID 的发行版时无需注册 Microsoft 应用。开发者可以通过 `MEMORIA_MICROSOFT_CLIENT_ID` 在编译时内置自己的应用 ID；本机设置优先于运行时环境变量和发行版默认值。完整流程见 [Microsoft 登录说明](docs/microsoft-login.md)。
+普通玩家使用已配置应用 ID 的发行版时无需注册 Microsoft 应用。开发者可使用下方本地 JSON 配置或 `MEMORIA_MICROSOFT_CLIENT_ID` 在编译时内置自己的应用 ID；本机设置优先于运行时环境变量和发行版默认值。完整流程见 [Microsoft 登录说明](docs/microsoft-login.md)。
+
+### 使用 JSON 配置打包
+
+在项目根目录的 `build-config.local.json` 中填写 `microsoft_client_id` 即可。该文件已被 Git 忽略；首次克隆项目时，从已提交的示例复制：
+
+```powershell
+Copy-Item build-config.example.json build-config.local.json
+```
+
+将 `microsoft_client_id` 的空字符串替换为自己的 Microsoft **应用程序（客户端）ID**，然后执行：
+
+```powershell
+cargo build --locked -p desktop --release
+```
+
+构建会自动读取 JSON 并把 ID 内置到 `target/release/desktop.exe`，分发时无需携带配置文件。修改配置后再次构建会自动更新；文件缺失或 ID 留空时不内置 ID。编译时非空的 `MEMORIA_MICROSOFT_CLIENT_ID` 环境变量优先于 JSON，方便 CI 打包。
+
+这里的应用 ID 是公共标识符，并非客户端密码；JSON 不用于存放 Microsoft client secret、AI API Key 或账户令牌。
 
 ## Microsoft / Minecraft API 用途
 
@@ -56,7 +79,9 @@ OAuth 请求的 scope 为 `XboxLive.signin offline_access`。Microsoft 账户密
 
 ## AI 与 MCP
 
-AI 页面可填写兼容接口地址、模型名称与 API Key。API Key 仅在当前进程内存中保留；提示词、目标版本与输出语言会发送给用户选定的服务。当前 AI 对话不调用本地工具，也不会代替用户安装或修改实例。
+在“设置 → AI 设置”填写兼容接口地址、模型名称与 API Key，点击“保存并应用”后生效，重启自动读取。地址、模型与密钥引用保存在 `%LOCALAPPDATA%/MemoriaLauncher/ai.json`（支持 `MEMORIA_DATA_DIR` 覆盖目录），API Key 保存在 Windows 凭据管理器，不写入 JSON。清空密钥后保存可移除已存密钥；本机服务允许不使用密钥。“测试连接”使用当前填写的配置发送简短测试，不会保存配置。提示词、目标版本与输出语言会发送给用户选定的服务。当前 AI 对话不调用本地工具，也不会代替用户安装或修改实例。
+
+实例以非零退出码或信号终止时，会弹出异常退出提示。点击 **启用 AI 分析** 会在 AI 页附加本次启动日志末尾（最多读取 64 KiB），点击 **发送** 才会交给所选服务；也可暂不分析或移除日志。常见凭据行会被遮蔽，但日志仍可能包含玩家名、本地路径等信息。顶部 **异常退出记录** 可重新打开最近一次提示。正常退出和启动前的校验失败不会触发该提示。
 
 单独构建只读 MCP 服务：
 
@@ -65,7 +90,7 @@ cargo build --locked -p mc-mcp
 .\target\debug\mc-mcp.exe --game-root=C:\Games\.minecraft
 ```
 
-提供 `minecraft_list_versions`、`minecraft_list_instances`、`minecraft_search_mods`、`minecraft_get_mod_info` 四个工具。客户端配置与参数示例见 [MCP 文档](docs/mcp.md)。
+提供 `minecraft_list_versions`、`minecraft_list_instances`、`minecraft_search_mods`、`minecraft_get_mod_info`、`minecraft_list_instance_logs`、`minecraft_read_instance_log` 六个工具。客户端配置与参数示例见 [MCP 文档](docs/mcp.md)。
 
 ## 配置与凭据
 
@@ -73,7 +98,8 @@ cargo build --locked -p mc-mcp
 | --- | --- |
 | Microsoft 应用客户端 ID、回调地址 | `%LOCALAPPDATA%\MemoriaLauncher\microsoft-login.json` |
 | 账户名称、UUID、当前账户 | `%LOCALAPPDATA%\MemoriaLauncher\accounts.json` |
-| 游戏目录与 Java 路径 | `%LOCALAPPDATA%\MemoriaLauncher\environment.json` |
+| 实例集文件夹、内存与 Java 路径 | `%LOCALAPPDATA%\MemoriaLauncher\environment.json` |
+| 下载源、自定义镜像与并行数量 | `%LOCALAPPDATA%\MemoriaLauncher\downloads.json` |
 | Microsoft 刷新令牌 | Windows Credential Manager：`MemoriaLauncher/Microsoft/<account-id>` |
 
 `MEMORIA_DATA_DIR` 可覆盖启动器配置目录。退出某个账户会删除对应的本地刷新令牌和账户记录；微软服务器端的权限撤销由用户在 Microsoft 账户中管理。

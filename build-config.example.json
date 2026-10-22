@@ -1,0 +1,4 @@
+{
+  "_comment": "复制为 build-config.local.json（已被 Git 忽略），在 microsoft_client_id 填入 Microsoft 应用程序（客户端）ID，然后运行 cargo build --locked -p desktop --release 即可在打包时自动注入。留空则不内置 ID。此处不是客户端密码，请勿填写 client secret、AI API Key 或账户令牌。",
+  "microsoft_client_id": ""
+}

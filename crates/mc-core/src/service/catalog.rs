@@ -27,6 +27,15 @@ pub trait CatalogProvider: Send + Sync {
 /// Official catalogue. Never substitutes example data when the request fails.
 pub struct MojangCatalogProvider;
 
+impl MojangCatalogProvider {
+    pub async fn list_with_client(
+        client: &crate::DownloadClient,
+    ) -> LauncherResult<Vec<GameVersion>> {
+        let manifest = client.json(super::downloads::VERSION_MANIFEST).await?;
+        Ok(manifest_versions(manifest))
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct Manifest {
     versions: Vec<ManifestVersion>,
@@ -75,22 +84,8 @@ fn manifest_versions(manifest: Manifest) -> Vec<GameVersion> {
 #[async_trait]
 impl CatalogProvider for MojangCatalogProvider {
     async fn list_game_versions(&self) -> LauncherResult<Vec<GameVersion>> {
-        crate::initialize_runtime();
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("MemoriaLauncher/", env!("CARGO_PKG_VERSION")))
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| crate::LauncherError::Internal(e.to_string()))?;
-        let manifest = client
-            .get("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json")
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map_err(|e| crate::LauncherError::Internal(format!("读取 Mojang 清单失败：{e}")))?
-            .json::<Manifest>()
-            .await
-            .map_err(|e| crate::LauncherError::InvalidMetadata(e.to_string()))?;
-        Ok(manifest_versions(manifest))
+        let client = crate::DownloadClient::new(crate::DownloadSettings::default())?;
+        Self::list_with_client(&client).await
     }
 
     async fn search_mods(&self, _: &str, _: Option<&str>) -> LauncherResult<Vec<ModProject>> {

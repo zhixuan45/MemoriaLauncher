@@ -228,6 +228,8 @@ fn launch(app: &Launcher) -> Element<'_, Message> {
             bold(
                 if app.launching {
                     "游戏运行中…"
+                } else if app.download.installing.is_some() {
+                    "正在安装游戏…"
                 } else {
                     "开始游戏"
                 },
@@ -240,7 +242,13 @@ fn launch(app: &Launcher) -> Element<'_, Message> {
     )
     .padding([12, 20])
     .width(Length::FillPortion(6))
-    .on_press_maybe((!app.launching && !app.loading).then_some(Message::Launch))
+    .on_press_maybe(
+        (!app.launching
+            && !app.loading
+            && !app.environment_saving
+            && app.download.installing.is_none())
+        .then_some(Message::Launch),
+    )
     .style(theme::action);
     let edit = button(
         row![icon(Icon::Sliders, WHITE, 21.), bold("编辑实例", 15.)]
@@ -298,8 +306,13 @@ fn stats(app: &Launcher) -> Element<'_, Message> {
 fn instances(app: &Launcher) -> Element<'_, Message> {
     let mut list = column![].spacing(6);
     if app.instances.is_empty() && !app.loading {
-        list = list
-            .push(label("未发现本地游戏，请在设置 → 环境配置中选择游戏目录。", 12.).color(MUTED));
+        list = list.push(
+            label(
+                "未发现本地游戏，请在设置 → 游戏设置中选择实例集文件夹。",
+                12.,
+            )
+            .color(MUTED),
+        );
     }
     for item in &app.instances {
         let active = app.active == item.instance.id;
@@ -442,8 +455,24 @@ fn changelog() -> Element<'static, Message> {
 
 fn queue(app: &Launcher) -> Element<'_, Message> {
     let mut entries = column![].spacing(22);
-    if app.tasks.is_empty() {
+    if app.tasks.is_empty() && app.download.installing.is_none() {
         entries = entries.push(label("暂无下载任务", 12.).color(MUTED));
+    }
+    if let Some(id) = &app.download.installing {
+        let percentage = app
+            .download
+            .progress
+            .as_ref()
+            .map(|progress| progress.completed as f32 / progress.total.max(1) as f32 * 100.)
+            .unwrap_or(0.);
+        entries = entries.push(
+            column![
+                bold(format!("Minecraft {id}"), 12.),
+                progress_bar(0.0..=100., percentage).girth(5),
+                label(&app.download.notice, 10.).color(MUTED),
+            ]
+            .spacing(8),
+        );
     }
     for task in &app.tasks {
         let progress = task.task.progress.percentage.clamp(0., 100.);
@@ -499,7 +528,10 @@ fn queue(app: &Launcher) -> Element<'_, Message> {
             header(
                 Icon::Download,
                 GREEN,
-                format!("下载队列 ({})", app.tasks.len()),
+                format!(
+                    "下载队列 ({})",
+                    app.tasks.len() + usize::from(app.download.installing.is_some())
+                ),
                 (!app.tasks.is_empty()).then_some((
                     if app.tasks.iter().any(|t| !t.paused) {
                         "全部暂停"

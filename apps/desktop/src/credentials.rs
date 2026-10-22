@@ -4,19 +4,55 @@ use mc_core::{CredentialStore, LauncherError, LauncherResult, StoredCredential};
 #[derive(Default)]
 pub struct SystemCredentialStore;
 
+pub fn load_ai_key(id: &str) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        platform::load(&format!("MemoriaLauncher/AI/{id}"))
+            .map_err(|e| format!("无法读取系统中的 AI 密钥：{e}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+        Err("此平台尚未接入 AI 密钥的系统存储".into())
+    }
+}
+
+pub fn save_ai_key(id: &str, secret: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        platform::save(&format!("MemoriaLauncher/AI/{id}"), secret)
+            .map_err(|e| format!("无法保存 AI 密钥到系统凭据管理器：{e}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (id, secret);
+        Err("此平台尚未接入 AI 密钥的系统存储".into())
+    }
+}
+
+pub fn delete_ai_key(id: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        platform::delete(&format!("MemoriaLauncher/AI/{id}"))
+            .map_err(|e| format!("无法清除旧 AI 密钥：{e}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+        Err("此平台尚未接入 AI 密钥的系统存储".into())
+    }
+}
+
 #[cfg(windows)]
 mod platform {
     use super::*;
     use windows_sys::Win32::{Foundation::ERROR_NOT_FOUND, Security::Credentials::*};
 
     fn target(id: &str) -> Vec<u16> {
-        format!("MemoriaLauncher/Microsoft/{id}")
-            .encode_utf16()
-            .chain(Some(0))
-            .collect()
+        id.encode_utf16().chain(Some(0)).collect()
     }
 
-    pub fn load(id: &str) -> LauncherResult<Option<StoredCredential>> {
+    pub fn load(id: &str) -> LauncherResult<Option<String>> {
         let name = target(id);
         let mut entry = std::ptr::null_mut();
         // CredRead owns the allocation until CredFree; copy the blob before freeing it.
@@ -42,20 +78,17 @@ mod platform {
             let refresh_token = String::from_utf8(bytes).map_err(|_| {
                 LauncherError::AuthUnavailable("系统凭据内容无效，请重新登录".into())
             })?;
-            Ok(Some(StoredCredential {
-                account_id: id.into(),
-                refresh_token,
-            }))
+            Ok(Some(refresh_token))
         }
     }
 
-    pub fn save(value: StoredCredential) -> LauncherResult<()> {
-        if value.account_id.is_empty() || value.refresh_token.is_empty() {
+    pub fn save(id: &str, secret: &str) -> LauncherResult<()> {
+        if id.is_empty() || secret.is_empty() {
             return Err(LauncherError::AuthUnavailable("不能保存空凭据".into()));
         }
-        let mut name = target(&value.account_id);
-        let mut username: Vec<_> = value.account_id.encode_utf16().chain(Some(0)).collect();
-        let mut token = value.refresh_token.into_bytes();
+        let mut name = target(id);
+        let mut username: Vec<_> = id.encode_utf16().chain(Some(0)).collect();
+        let mut token = secret.as_bytes().to_vec();
         let entry = CREDENTIALW {
             Type: CRED_TYPE_GENERIC,
             TargetName: name.as_mut_ptr(),
@@ -91,7 +124,12 @@ impl CredentialStore for SystemCredentialStore {
     async fn load(&self, account_id: &str) -> LauncherResult<Option<StoredCredential>> {
         #[cfg(windows)]
         {
-            platform::load(account_id)
+            platform::load(&format!("MemoriaLauncher/Microsoft/{account_id}")).map(|value| {
+                value.map(|refresh_token| StoredCredential {
+                    account_id: account_id.into(),
+                    refresh_token,
+                })
+            })
         }
         #[cfg(not(windows))]
         {
@@ -105,7 +143,10 @@ impl CredentialStore for SystemCredentialStore {
     async fn save(&self, credential: StoredCredential) -> LauncherResult<()> {
         #[cfg(windows)]
         {
-            platform::save(credential)
+            platform::save(
+                &format!("MemoriaLauncher/Microsoft/{}", credential.account_id),
+                &credential.refresh_token,
+            )
         }
         #[cfg(not(windows))]
         {
@@ -119,7 +160,7 @@ impl CredentialStore for SystemCredentialStore {
     async fn delete(&self, account_id: &str) -> LauncherResult<()> {
         #[cfg(windows)]
         {
-            platform::delete(account_id)
+            platform::delete(&format!("MemoriaLauncher/Microsoft/{account_id}"))
         }
         #[cfg(not(windows))]
         {
@@ -141,7 +182,7 @@ mod tests {
         struct Cleanup(String);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                let _ = platform::delete(&self.0);
+                let _ = platform::delete(&format!("MemoriaLauncher/Microsoft/{}", self.0));
             }
         }
         let _cleanup = Cleanup(id.clone());

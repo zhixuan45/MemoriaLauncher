@@ -19,6 +19,10 @@ pub fn initialize_runtime() {
 }
 pub use service::{
     catalog::{CatalogProvider, MockCatalogProvider, MojangCatalogProvider},
+    downloads::{
+        DownloadClient, DownloadFile, DownloadProgress, DownloadSettings, DownloadSource,
+        ProgressCallback,
+    },
     instance::{InstanceService, MockInstanceService},
     online_catalog::OnlineCatalog,
     task::{InMemoryTaskService, TaskService},
