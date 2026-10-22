@@ -14,6 +14,7 @@ pub use model::{
 };
 pub use runtime::*;
 pub use service::{
+    online_catalog::OnlineCatalog,
     catalog::{CatalogProvider, MockCatalogProvider},
     instance::{InstanceService, MockInstanceService},
     task::{InMemoryTaskService, TaskService},
