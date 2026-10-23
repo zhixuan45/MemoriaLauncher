@@ -13,6 +13,7 @@ pub struct AuthSession {
     pub xuid: String,
     pub client_id: String,
     pub expires_at: DateTime<Utc>,
+    pub is_offline: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,16 +24,61 @@ pub struct LoginStart {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeviceCodeStart {
+    pub user_code: String,
+    pub device_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DevicePollResult {
+    Pending,
+    SlowDown,
+    Success {
+        access_token: String,
+        refresh_token: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AuthAccount {
     pub id: String,
     pub username: String,
     pub uuid: String,
 }
 
+impl AuthAccount {
+    /// 构造标准离线账户
+    pub fn offline(username: impl Into<String>) -> Self {
+        let username = username.into();
+        let uuid = offline_uuid(&username);
+        Self {
+            id: format!("offline:{username}"),
+            username,
+            uuid,
+        }
+    }
+
+    /// 判断是否为离线测试账户
+    pub fn is_offline(&self) -> bool {
+        self.id.starts_with("offline:")
+    }
+}
+
+/// 基于玩家名称生成符合 Minecraft 官方标准的离线 UUIDv3
+pub fn offline_uuid(username: &str) -> String {
+    uuid::Uuid::new_v3(&uuid::Uuid::nil(), format!("OfflinePlayer:{username}").as_bytes()).to_string()
+}
+
 #[derive(Clone)]
 pub struct MicrosoftAuthConfig {
     pub client_id: String,
     pub redirect_uri: String,
+    device_code_endpoint: Option<String>,
+    token_endpoint: Option<String>,
 }
 
 impl MicrosoftAuthConfig {
@@ -43,6 +89,8 @@ impl MicrosoftAuthConfig {
         let config = Self {
             client_id: client_id.into(),
             redirect_uri: redirect_uri.into(),
+            device_code_endpoint: None,
+            token_endpoint: None,
         };
         if config.client_id.trim().is_empty() || config.redirect_uri.trim().is_empty() {
             return Err(LauncherError::AuthUnavailable(
@@ -50,6 +98,16 @@ impl MicrosoftAuthConfig {
             ));
         }
         Ok(config)
+    }
+
+    /// 离线模式占位配置，仅用于离线会话解析
+    pub fn offline_dummy() -> Self {
+        Self {
+            client_id: "00000000-0000-0000-0000-000000000000".into(),
+            redirect_uri: "http://localhost:53682/oauth/callback".into(),
+            device_code_endpoint: None,
+            token_endpoint: None,
+        }
     }
 
     pub fn from_env() -> LauncherResult<Self> {
@@ -61,6 +119,30 @@ impl MicrosoftAuthConfig {
         let redirect_uri = std::env::var("MC_LAUNCHER_REDIRECT_URI")
             .unwrap_or_else(|_| "http://localhost:53682/oauth/callback".into());
         Self::new(client_id, redirect_uri)
+    }
+
+    /// 覆盖设备码与令牌端点，主要用于测试
+    #[doc(hidden)]
+    pub fn with_custom_endpoints(
+        mut self,
+        device_code_endpoint: impl Into<String>,
+        token_endpoint: impl Into<String>,
+    ) -> Self {
+        self.device_code_endpoint = Some(device_code_endpoint.into());
+        self.token_endpoint = Some(token_endpoint.into());
+        self
+    }
+
+    pub fn device_code_endpoint(&self) -> &str {
+        self.device_code_endpoint
+            .as_deref()
+            .unwrap_or("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")
+    }
+
+    pub fn token_endpoint(&self) -> &str {
+        self.token_endpoint
+            .as_deref()
+            .unwrap_or("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
     }
 }
 
@@ -127,13 +209,34 @@ impl std::fmt::Debug for AuthSession {
 }
 
 impl AuthSession {
+    /// 构造免认证的本地离线测试会话
+    pub fn offline(username: impl Into<String>) -> Self {
+        let username = username.into();
+        let uuid = offline_uuid(&username);
+        Self {
+            username,
+            uuid,
+            access_token: "0".into(),
+            xuid: "0".into(),
+            client_id: "00000000-0000-0000-0000-000000000000".into(),
+            expires_at: Utc::now() + Duration::days(36500),
+            is_offline: true,
+        }
+    }
+
     pub(crate) fn validate(&self) -> LauncherResult<()> {
+        if self.username.trim().is_empty() || uuid::Uuid::parse_str(&self.uuid).is_err() {
+            return Err(LauncherError::AuthUnavailable(
+                "无效的 Minecraft 账户用户名或 UUID".into(),
+            ));
+        }
+        if self.is_offline {
+            return Ok(());
+        }
         if self.access_token.trim().is_empty()
             || self.expires_at <= Utc::now()
-            || self.username.trim().is_empty()
             || self.xuid.trim().is_empty()
             || self.client_id.trim().is_empty()
-            || uuid::Uuid::parse_str(&self.uuid).is_err()
         {
             return Err(LauncherError::AuthUnavailable(
                 "缺少有效的 Minecraft 正版会话，或会话已过期".into(),
@@ -220,6 +323,137 @@ where
 
     pub async fn logout(&self, account_id: &str) -> LauncherResult<()> {
         self.store.delete(account_id).await
+    }
+
+    /// 发起微软设备代码流授权请求
+    pub async fn begin_device_login(&self) -> LauncherResult<DeviceCodeStart> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| LauncherError::AuthUnavailable(format!("初始化 HTTP 客户端失败: {e}")))?;
+        let params = [
+            ("client_id", self.config.client_id.as_str()),
+            ("scope", "XboxLive.signin offline_access"),
+        ];
+        let response = client
+            .post(self.config.device_code_endpoint())
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| LauncherError::AuthUnavailable(format!("请求微软设备代码失败: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            let desc = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| {
+                    v.get("error_description")
+                        .and_then(|d| d.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| v.get("error").and_then(|e| e.as_str()).map(|s| s.to_string()))
+                })
+                .unwrap_or(body);
+            return Err(LauncherError::AuthUnavailable(format!(
+                "获取设备代码失败 ({status}): {desc}"
+            )));
+        }
+
+        let start: DeviceCodeStart = response
+            .json()
+            .await
+            .map_err(|e| LauncherError::AuthUnavailable(format!("解析设备代码响应失败: {e}")))?;
+        Ok(start)
+    }
+
+    /// 轮询微软设备授权令牌状态
+    pub async fn poll_device_token(&self, device_code: &str) -> LauncherResult<DevicePollResult> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| LauncherError::AuthUnavailable(format!("初始化 HTTP 客户端失败: {e}")))?;
+        let params = [
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ("client_id", self.config.client_id.as_str()),
+            ("device_code", device_code),
+        ];
+        let response = client
+            .post(self.config.token_endpoint())
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| LauncherError::AuthUnavailable(format!("轮询设备授权令牌失败: {e}")))?;
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| LauncherError::AuthUnavailable(format!("读取令牌响应失败: {e}")))?;
+
+        if status.is_success() {
+            let value: serde_json::Value = serde_json::from_str(&body)
+                .map_err(|e| LauncherError::AuthUnavailable(format!("解析令牌响应失败: {e}")))?;
+            let access_token = value
+                .get("access_token")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| LauncherError::AuthUnavailable("微软令牌响应缺少 access_token".into()))?
+                .to_string();
+            let refresh_token = value
+                .get("refresh_token")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| LauncherError::AuthUnavailable("微软令牌响应缺少 refresh_token".into()))?
+                .to_string();
+            return Ok(DevicePollResult::Success {
+                access_token,
+                refresh_token,
+            });
+        }
+
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+                if let Some(error) = value.get("error").and_then(|v| v.as_str()) {
+                    return match error {
+                        "authorization_pending" => Ok(DevicePollResult::Pending),
+                        "slow_down" => Ok(DevicePollResult::SlowDown),
+                        "expired_token" => {
+                            Err(LauncherError::AuthUnavailable("设备代码已过期，请重新发起登录".into()))
+                        }
+                        other => {
+                            let desc = value
+                                .get("error_description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(other);
+                            Err(LauncherError::AuthUnavailable(format!("微软设备认证失败: {desc}")))
+                        }
+                    };
+                }
+            }
+        }
+
+        Err(LauncherError::AuthUnavailable(format!(
+            "轮询设备授权失败 ({status}): {body}"
+        )))
+    }
+
+    /// 完成设备代码登录后的 Minecraft 凭据置换并持久化
+    pub async fn complete_device_login(
+        &self,
+        access_token: String,
+        refresh_token: String,
+    ) -> LauncherResult<AuthAccount> {
+        let config = self.config.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            exchange_minecraft(&config, access_token, refresh_token)
+        })
+        .await
+        .map_err(|e| LauncherError::Internal(e.to_string()))??;
+        self.store
+            .save(StoredCredential {
+                account_id: result.account.id.clone(),
+                refresh_token: result.refresh_token,
+            })
+            .await?;
+        Ok(result.account)
     }
 }
 
@@ -338,6 +572,7 @@ fn exchange_minecraft(
         xuid: userhash,
         client_id: config.client_id.clone(),
         expires_at: Utc::now() + Duration::seconds(i64::from(minecraft.expires_in.max(60))),
+        is_offline: false,
     };
     Ok(ExchangeResult {
         account,
@@ -371,6 +606,10 @@ where
     S: CredentialStore + 'static,
 {
     async fn minecraft_session(&self, account_id: &str) -> LauncherResult<AuthSession> {
+        if account_id.starts_with("offline:") {
+            let username = account_id.strip_prefix("offline:").unwrap_or(account_id);
+            return Ok(AuthSession::offline(username));
+        }
         let credential =
             self.store.load(account_id).await?.ok_or_else(|| {
                 LauncherError::AuthUnavailable("账户尚未完成 Microsoft 登录".into())
@@ -400,10 +639,26 @@ pub struct UnavailableAuthProvider;
 
 #[async_trait]
 impl AuthProvider for UnavailableAuthProvider {
-    async fn minecraft_session(&self, _account_id: &str) -> LauncherResult<AuthSession> {
+    async fn minecraft_session(&self, account_id: &str) -> LauncherResult<AuthSession> {
+        if account_id.starts_with("offline:") {
+            let username = account_id.strip_prefix("offline:").unwrap_or(account_id);
+            return Ok(AuthSession::offline(username));
+        }
         Err(LauncherError::AuthUnavailable(
             "当前桌面配置未启用 Microsoft/Minecraft 正版认证 Provider；请先完成应用注册并注入认证 Provider".into(),
         ))
+    }
+}
+
+/// 专用于离线模式的认证 Provider
+#[derive(Clone, Default)]
+pub struct OfflineAuthProvider;
+
+#[async_trait]
+impl AuthProvider for OfflineAuthProvider {
+    async fn minecraft_session(&self, account_id: &str) -> LauncherResult<AuthSession> {
+        let username = account_id.strip_prefix("offline:").unwrap_or(account_id);
+        Ok(AuthSession::offline(username))
     }
 }
 
@@ -493,5 +748,189 @@ mod tests {
         assert!(!login.code_verifier.is_empty());
         assert!(login.authorization_url.contains("code_challenge"));
         assert!(login.authorization_url.contains("client_id="));
+    }
+
+    // 辅助工具：模拟 OAuth 认证服务器
+    async fn spawn_mock_server(status: u16, body: &'static str) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let url = format!("http://{}", addr);
+        let handle = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                let status_line = match status {
+                    200 => "HTTP/1.1 200 OK",
+                    400 => "HTTP/1.1 400 Bad Request",
+                    500 => "HTTP/1.1 500 Internal Server Error",
+                    _ => "HTTP/1.1 404 Not Found",
+                };
+                let response = format!(
+                    "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        (url, handle)
+    }
+
+    #[tokio::test]
+    async fn begin_device_login_returns_parsed_start_info() {
+        let body = r#"{
+            "user_code": "ABCDEFGH",
+            "device_code": "dev_code_123",
+            "verification_uri": "https://microsoft.com/devicelogin",
+            "expires_in": 900,
+            "interval": 5,
+            "message": "Visit https://microsoft.com/devicelogin"
+        }"#;
+        let (url, _h) = spawn_mock_server(200, body).await;
+        let config = MicrosoftAuthConfig::new("test_client", "http://localhost/callback")
+            .unwrap()
+            .with_custom_endpoints(&url, &url);
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let start = provider.begin_device_login().await.unwrap();
+        assert_eq!(start.user_code, "ABCDEFGH");
+        assert_eq!(start.device_code, "dev_code_123");
+        assert_eq!(start.verification_uri, "https://microsoft.com/devicelogin");
+        assert_eq!(start.expires_in, 900);
+        assert_eq!(start.interval, 5);
+        assert_eq!(start.message.as_deref(), Some("Visit https://microsoft.com/devicelogin"));
+    }
+
+    #[tokio::test]
+    async fn begin_device_login_handles_http_error() {
+        let body = r#"{"error":"invalid_client","error_description":"Client ID is not valid."}"#;
+        let (url, _h) = spawn_mock_server(400, body).await;
+        let config = MicrosoftAuthConfig::new("bad_client", "http://localhost/callback")
+            .unwrap()
+            .with_custom_endpoints(&url, &url);
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let err = provider.begin_device_login().await.unwrap_err();
+        match err {
+            LauncherError::AuthUnavailable(msg) => {
+                assert!(msg.contains("Client ID is not valid"));
+            }
+            other => panic!("预期 AuthUnavailable，实际得到: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn poll_device_token_pending_and_slow_down() {
+        let (url_pending, _h1) = spawn_mock_server(400, r#"{"error":"authorization_pending"}"#).await;
+        let config = MicrosoftAuthConfig::new("client", "http://localhost/callback")
+            .unwrap()
+            .with_custom_endpoints(&url_pending, &url_pending);
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let res = provider.poll_device_token("dev_code").await.unwrap();
+        assert_eq!(res, DevicePollResult::Pending);
+
+        let (url_slow, _h2) = spawn_mock_server(400, r#"{"error":"slow_down"}"#).await;
+        let config = MicrosoftAuthConfig::new("client", "http://localhost/callback")
+            .unwrap()
+            .with_custom_endpoints(&url_slow, &url_slow);
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let res = provider.poll_device_token("dev_code").await.unwrap();
+        assert_eq!(res, DevicePollResult::SlowDown);
+    }
+
+    #[tokio::test]
+    async fn poll_device_token_expired_and_errors() {
+        let (url_expired, _h1) = spawn_mock_server(400, r#"{"error":"expired_token"}"#).await;
+        let config = MicrosoftAuthConfig::new("client", "http://localhost/callback")
+            .unwrap()
+            .with_custom_endpoints(&url_expired, &url_expired);
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let err = provider.poll_device_token("dev_code").await.unwrap_err();
+        match err {
+            LauncherError::AuthUnavailable(msg) => {
+                assert!(msg.contains("设备代码已过期，请重新发起登录"));
+            }
+            other => panic!("预期 AuthUnavailable，实际得到: {:?}", other),
+        }
+
+        let (url_declined, _h2) = spawn_mock_server(
+            400,
+            r#"{"error":"access_denied","error_description":"The user declined consent."}"#,
+        ).await;
+        let config = MicrosoftAuthConfig::new("client", "http://localhost/callback")
+            .unwrap()
+            .with_custom_endpoints(&url_declined, &url_declined);
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let err = provider.poll_device_token("dev_code").await.unwrap_err();
+        match err {
+            LauncherError::AuthUnavailable(msg) => {
+                assert!(msg.contains("The user declined consent."));
+            }
+            other => panic!("预期 AuthUnavailable，实际得到: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn poll_device_token_success() {
+        let body = r#"{
+            "access_token": "mock_access_token",
+            "refresh_token": "mock_refresh_token",
+            "token_type": "Bearer",
+            "expires_in": 3600
+        }"#;
+        let (url, _h) = spawn_mock_server(200, body).await;
+        let config = MicrosoftAuthConfig::new("client", "http://localhost/callback")
+            .unwrap()
+            .with_custom_endpoints(&url, &url);
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let res = provider.poll_device_token("dev_code").await.unwrap();
+        assert_eq!(
+            res,
+            DevicePollResult::Success {
+                access_token: "mock_access_token".into(),
+                refresh_token: "mock_refresh_token".into(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_device_login_handles_invalid_tokens() {
+        let config = MicrosoftAuthConfig::new("client", "http://localhost/callback").unwrap();
+        let provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let err = provider
+            .complete_device_login("invalid_access".into(), "invalid_refresh".into())
+            .await
+            .unwrap_err();
+        match err {
+            LauncherError::AuthUnavailable(msg) => {
+                assert!(msg.contains("Xbox Live"));
+            }
+            other => panic!("预期 AuthUnavailable，实际得到: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn offline_account_and_session_generation() {
+        let account = AuthAccount::offline("Steve");
+        assert_eq!(account.username, "Steve");
+        assert!(account.is_offline());
+        assert_eq!(account.id, "offline:Steve");
+        assert_eq!(account.uuid, offline_uuid("Steve"));
+
+        let session = AuthSession::offline("Steve");
+        assert!(session.is_offline);
+        assert_eq!(session.username, "Steve");
+        assert!(session.validate().is_ok());
+
+        let offline_provider = OfflineAuthProvider;
+        let s1 = offline_provider.minecraft_session("offline:Steve").await.unwrap();
+        assert_eq!(s1.username, "Steve");
+
+        let unavailable = UnavailableAuthProvider;
+        let s2 = unavailable.minecraft_session("offline:Alex").await.unwrap();
+        assert_eq!(s2.username, "Alex");
+
+        let config = MicrosoftAuthConfig::new("client", "http://localhost/callback").unwrap();
+        let ms_provider = MicrosoftAuthProvider::new(config, Arc::new(MemoryCredentialStore::default()));
+        let s3 = ms_provider.minecraft_session("offline:Player").await.unwrap();
+        assert_eq!(s3.username, "Player");
     }
 }

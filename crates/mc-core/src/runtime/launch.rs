@@ -459,15 +459,23 @@ fn build_upstream_arguments(
         .map_err(|e| LauncherError::InvalidMetadata(e.to_string()))?;
     let uuid = session.uuid.replace('-', "");
     patch_account_placeholders(&mut version, session, &uuid);
+    let account = if session.is_offline {
+        mc_launcher_core::account::Account::Offline {
+            username: session.username.clone(),
+            uuid,
+        }
+    } else {
+        mc_launcher_core::account::Account::Microsoft {
+            username: session.username.clone(),
+            uuid,
+            access_token: session.access_token.clone(),
+        }
+    };
     let command = launcher
         .build_launch_command_from_version(
             &version,
             mc_launcher_core::command::builder::LaunchOptions {
-                account: mc_launcher_core::account::Account::Microsoft {
-                    username: session.username.clone(),
-                    uuid,
-                    access_token: session.access_token.clone(),
-                },
+                account,
                 java_executable: Some(options.java.clone()),
                 game_directory: Some(game_directory.to_path_buf()),
                 natives_directory: Some(natives_directory.to_path_buf()),
@@ -563,7 +571,7 @@ fn build_legacy_arguments(
         ),
         ("auth_xuid", session.xuid.clone()),
         ("clientid", session.client_id.clone()),
-        ("user_type", "msa".into()),
+        ("user_type", if session.is_offline { "Legacy".into() } else { "msa".into() }),
         ("user_properties", "{}".into()),
         ("version_name", version.metadata.id.clone()),
         (

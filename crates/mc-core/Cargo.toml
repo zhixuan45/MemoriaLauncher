@@ -18,4 +18,5 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 regex = "1.13"
 sha1 = "0.10"
 zip = { version = "6", default-features = false, features = ["deflate"] }
+url = "2.5"
 mc-launcher-core = { path = "../vendor/mc-launcher-core" }

@@ -14,7 +14,7 @@ async-trait = "0.1"
 # 序列化与数据处理
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-uuid = { version = "1.10", features = ["v4", "serde"] }
+uuid = { version = "1.10", features = ["v4", "v3", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # 错误处理与日志
@@ -29,3 +29,10 @@ mc-core = { path = "crates/mc-core" }
 # Keep debug information for our Rust code while disabling it for ring only.
 [profile.dev.package.ring]
 debug = 0
+
+# 单文件发布优化配置
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

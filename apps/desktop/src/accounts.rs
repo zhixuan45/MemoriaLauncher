@@ -1,21 +1,23 @@
+use crate::accounts_flow;
 use crate::credentials::SystemCredentialStore;
 use iced::Task;
-use mc_core::{AuthAccount, MicrosoftAuthConfig, MicrosoftAuthProvider};
+use mc_core::{AuthAccount, DeviceCodeStart, MicrosoftAuthConfig, MicrosoftAuthProvider};
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::Notify,
-};
+use tokio::sync::Notify;
 
 pub type Provider = MicrosoftAuthProvider<SystemCredentialStore>;
 
 const DEFAULT_REDIRECT_URI: &str = "http://localhost:53682/oauth/callback";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginMode {
+    Browser,
+    DeviceCode,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoginSettings {
@@ -45,7 +47,7 @@ impl LoginSettings {
         }
         uuid::Uuid::parse_str(&self.client_id)
             .map_err(|_| "客户端 ID 格式无效，请复制应用概述页的应用程序（客户端）ID。")?;
-        callback_address(&self.redirect_uri)?;
+        accounts_flow::callback_address(&self.redirect_uri)?;
         MicrosoftAuthConfig::new(&self.client_id, &self.redirect_uri).map_err(|e| e.to_string())
     }
 }
@@ -119,12 +121,27 @@ pub enum Message {
     Select(String),
     Remove(String),
     Saved(Result<AccountIndex, String>),
+    // 登录交互增强消息
+    SwitchMode(LoginMode),
+    DeviceCodeStarted(Result<DeviceCodeStart, String>),
+    OpenBrowser(String),
+    CopyText(String, &'static str),
+    // 离线测试账户消息
+    OfflineInput(String),
+    ToggleOfflineInput,
+    AddOffline,
 }
 
 pub struct State {
     pub index: AccountIndex,
     pub busy: bool,
     pub logging_in: bool,
+    pub login_mode: LoginMode,
+    pub auth_url: Option<String>,
+    pub device_code: Option<DeviceCodeStart>,
+    pub copied_feedback: Option<String>,
+    pub offline_input: String,
+    pub showing_offline_input: bool,
     pub notice: String,
     pub provider: Result<Provider, String>,
     pub login_settings: LoginSettings,
@@ -178,6 +195,12 @@ impl State {
             busy: true,
             ready: false,
             logging_in: false,
+            login_mode: LoginMode::Browser,
+            auth_url: None,
+            device_code: None,
+            copied_feedback: None,
+            offline_input: "Steve".into(),
+            showing_offline_input: false,
             notice: "正在读取已保存的账户…".into(),
             provider,
             login_settings,
@@ -247,15 +270,146 @@ impl State {
     }
 
     pub fn description(&self) -> &str {
-        if self.index.current().is_some() {
-            "Microsoft · 启动时验证会话"
+        if let Some(account) = self.index.current() {
+            if account.is_offline() {
+                "离线测试账户 · 本地单人/内网"
+            } else {
+                "Microsoft · 启动时验证会话"
+            }
         } else {
-            "添加 Microsoft 账户"
+            "添加 Microsoft 或离线账户"
+        }
+    }
+
+    /// 启动所选模式的登录授权流程
+    pub fn start_login(&mut self) -> Task<Message> {
+        let provider = match &self.provider {
+            Ok(provider) => provider.clone(),
+            Err(e) => {
+                self.notice = e.clone();
+                return Task::none();
+            }
+        };
+        let config = match &self.config {
+            Ok(config) => config.clone(),
+            Err(error) => {
+                self.busy = false;
+                self.logging_in = false;
+                self.notice = error.clone();
+                return Task::none();
+            }
+        };
+        self.busy = true;
+        self.logging_in = true;
+        self.copied_feedback = None;
+        self.cancel = Arc::new(Notify::new());
+        let cancel = self.cancel.clone();
+
+        match self.login_mode {
+            LoginMode::Browser => {
+                let login = provider.begin_login();
+                let auth_url = login.authorization_url.clone();
+                self.auth_url = Some(auth_url.clone());
+                self.device_code = None;
+                self.notice = "等待浏览器授权完成（最长等待 3 分钟）…".into();
+
+                // 尝试自动调起默认浏览器
+                let _ = accounts_flow::open_browser(&auth_url);
+
+                Task::perform(
+                    async move {
+                        let (redirect, port) =
+                            accounts_flow::callback_address(&config.redirect_uri)?;
+                        let listener = tokio::net::TcpListener::bind((
+                            std::net::Ipv4Addr::LOCALHOST,
+                            port,
+                        ))
+                        .await
+                        .map_err(|e| format!("无法监听登录回调端口 {port}：{e}"))?;
+
+                        tokio::select! {
+                            res = async {
+                                let callback_url = accounts_flow::receive_callback(listener, &redirect, &login.state).await?;
+                                provider.complete_login(&login, &callback_url).await.map_err(|e| e.to_string())
+                            } => res,
+                            _ = cancel.notified() => Err("已取消登录".into()),
+                        }
+                    },
+                    Message::LoggedIn,
+                )
+            }
+            LoginMode::DeviceCode => {
+                self.auth_url = None;
+                self.device_code = None;
+                self.notice = "正在向微软申请设备授权码…".into();
+                let provider_clone = provider.clone();
+                Task::perform(
+                    async move {
+                        tokio::select! {
+                            res = provider_clone.begin_device_login() => res.map_err(|e| e.to_string()),
+                            _ = cancel.notified() => Err("已取消登录".into()),
+                        }
+                    },
+                    Message::DeviceCodeStarted,
+                )
+            }
         }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::SwitchMode(mode) => {
+                if self.login_mode != mode {
+                    self.login_mode = mode;
+                    self.copied_feedback = None;
+                    if self.logging_in {
+                        self.cancel.notify_one();
+                        self.cancel = Arc::new(Notify::new());
+                        self.auth_url = None;
+                        self.device_code = None;
+                        return self.start_login();
+                    }
+                }
+            }
+            Message::CopyText(content, label) => {
+                self.copied_feedback = Some(format!("{label}已复制到剪贴板"));
+                return iced::clipboard::write(content);
+            }
+            Message::OpenBrowser(url) => {
+                let _ = accounts_flow::open_browser(&url);
+            }
+            Message::OfflineInput(val) => {
+                self.offline_input = val;
+            }
+            Message::ToggleOfflineInput => {
+                self.showing_offline_input = !self.showing_offline_input;
+                if self.showing_offline_input && self.offline_input.trim().is_empty() {
+                    self.offline_input = "Steve".into();
+                }
+            }
+            Message::AddOffline if !self.busy => {
+                let name = self.offline_input.trim();
+                if name.is_empty() {
+                    self.notice = "离线玩家名称不能为空。".into();
+                    return Task::none();
+                }
+                if name.len() > 16 {
+                    self.notice = "离线玩家名称长度不可超过 16 个字符。".into();
+                    return Task::none();
+                }
+                if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    self.notice = "离线玩家名称只能包含英文字母、数字和下划线。".into();
+                    return Task::none();
+                }
+                let account = mc_core::AuthAccount::offline(name);
+                let mut index = self.index.clone();
+                index.upsert(account);
+                self.showing_offline_input = false;
+                self.notice = format!("离线测试账户 {name} 添加成功。");
+                self.busy = true;
+                let path = self.path.clone();
+                return Task::perform(async move { write_index(&path, index).await }, Message::Saved);
+            }
             Message::ClientId(value) if !self.busy => {
                 self.login_settings.client_id = value;
                 self.settings_notice = "修改尚未保存，请点击保存登录配置。".into();
@@ -298,7 +452,8 @@ impl State {
                                 "登录配置已保存并生效。客户端 ID 已更改，请重新登录已有账户。"
                             } else {
                                 "登录配置已保存并生效，下次启动自动读取。现在可以添加 Microsoft 账户。"
-                            }.into();
+                            }
+                            .into();
                             self.notice = self.settings_notice.clone();
                         }
                         Err(error) => self.settings_notice = error,
@@ -323,40 +478,62 @@ impl State {
                 }
             }
             Message::Login if !self.busy && self.ready => {
-                let provider = match &self.provider {
-                    Ok(provider) => provider.clone(),
-                    Err(e) => {
-                        self.notice = e.clone();
-                        return Task::none();
+                if !self.has_microsoft_app() {
+                    self.notice = "尚未配置客户端 ID，请先在设置中填写。".into();
+                    return Task::none();
+                }
+                return self.start_login();
+            }
+            Message::DeviceCodeStarted(result) => {
+                if !self.logging_in {
+                    return Task::none();
+                }
+                match result {
+                    Ok(start) => {
+                        self.device_code = Some(start.clone());
+                        self.notice = "请在浏览器打开验证网址并输入设备验证码。".into();
+                        // 尝试自动打开验证网址
+                        let _ = accounts_flow::open_browser(&start.verification_uri);
+
+                        let cancel = self.cancel.clone();
+                        let provider = match &self.provider {
+                            Ok(p) => p.clone(),
+                            Err(e) => {
+                                self.busy = false;
+                                self.logging_in = false;
+                                self.notice = e.clone();
+                                return Task::none();
+                            }
+                        };
+                        return Task::perform(
+                            accounts_flow::run_device_code_flow(provider, start, cancel),
+                            Message::LoggedIn,
+                        );
                     }
-                };
-                self.busy = true;
-                self.logging_in = true;
-                self.cancel = Arc::new(Notify::new());
-                let cancel = self.cancel.clone();
-                let config = match &self.config {
-                    Ok(config) => config.clone(),
-                    Err(error) => {
+                    Err(e) => {
                         self.busy = false;
                         self.logging_in = false;
-                        self.notice = error.clone();
-                        return Task::none();
+                        self.auth_url = None;
+                        self.device_code = None;
+                        self.notice = e;
                     }
-                };
-                self.notice = "请在浏览器完成 Microsoft 登录；等待回调（最多 3 分钟）。".into();
-                return Task::perform(
-                    async move {
-                        tokio::select! {
-                            result = browser_login(provider, config) => result,
-                            _ = cancel.notified() => Err("已取消登录".into()),
-                        }
-                    },
-                    Message::LoggedIn,
-                );
+                }
             }
-            Message::CancelLogin => self.cancel.notify_one(),
+            Message::CancelLogin => {
+                self.cancel.notify_one();
+                self.cancel = Arc::new(Notify::new());
+                self.logging_in = false;
+                self.busy = false;
+                self.auth_url = None;
+                self.device_code = None;
+                self.copied_feedback = None;
+                self.notice = "已取消登录。".into();
+            }
             Message::LoggedIn(result) => {
                 self.logging_in = false;
+                self.auth_url = None;
+                self.device_code = None;
+                self.copied_feedback = None;
                 match result {
                     Ok(account) => {
                         let mut index = self.index.clone();
@@ -421,118 +598,6 @@ impl State {
         }
         Task::none()
     }
-}
-
-fn callback_address(redirect: &str) -> Result<(url::Url, u16), String> {
-    // Validate the raw URI before URL parsing can normalize traversal segments.
-    let remainder = redirect
-        .strip_prefix("http://")
-        .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
-        .ok_or("登录回调必须包含 HTTP 路径")?;
-    if remainder.is_empty() || remainder.contains("..") || remainder.contains('\\') {
-        return Err("登录回调路径无效".into());
-    }
-    let url = url::Url::parse(redirect).map_err(|_| "登录回调地址无效")?;
-    if url.scheme() != "http"
-        || !matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return Err("桌面登录需要 http://localhost:端口/路径 或 127.0.0.1 回调地址。".into());
-    }
-    let port = url
-        .port()
-        .filter(|port| *port != 0)
-        .ok_or("登录回调缺少有效的显式端口")?;
-    Ok((url, port))
-}
-
-async fn browser_login(
-    provider: Provider,
-    config: MicrosoftAuthConfig,
-) -> Result<AuthAccount, String> {
-    let (redirect, port) = callback_address(&config.redirect_uri)?;
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
-        .await
-        .map_err(|e| format!("无法监听登录回调端口 {port}：{e}"))?;
-    let login = provider.begin_login();
-    open_browser(&login.authorization_url)?;
-    let callback = receive_callback(listener, &redirect, &login.state).await?;
-    provider
-        .complete_login(&login, &callback)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-async fn receive_callback(
-    listener: TcpListener,
-    redirect: &url::Url,
-    expected_state: &str,
-) -> Result<String, String> {
-    tokio::time::timeout(Duration::from_secs(180), async {
-        loop {
-            let (mut stream, _) = listener.accept().await.map_err(|e| e.to_string())?;
-            let mut request = Vec::new();
-            let read = tokio::time::timeout(Duration::from_secs(5), async {
-                while request.len() < 8192 && !request.ends_with(b"\r\n\r\n") {
-                    let byte = stream.read_u8().await?;
-                    request.push(byte);
-                }
-                Ok::<_, std::io::Error>(())
-            }).await;
-            if !matches!(read, Ok(Ok(()))) || !request.ends_with(b"\r\n\r\n") { continue; }
-            let raw = String::from_utf8_lossy(&request);
-            let mut line = raw.lines().next().unwrap_or_default().split_whitespace();
-            let method = line.next();
-            let target = line.next().unwrap_or_default();
-            let Ok(url) = redirect.join(target) else { continue; };
-            let state = url.query_pairs().find(|(key, _)| key == "state").map(|(_, value)| value.into_owned());
-            if method != Some("GET") || !target.starts_with('/') || url.origin() != redirect.origin()
-                || target.split('?').next() != Some(redirect.path())
-                || url.path() != redirect.path() || state.as_deref() != Some(expected_state)
-                || !url.query_pairs().any(|(key, _)| key == "code" || key == "error") {
-                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
-                continue;
-            }
-            let body = "Login response received. You can return to Memoria Launcher.";
-            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-            let _ = stream.write_all(response.as_bytes()).await;
-            if url.query_pairs().any(|(key, _)| key == "error") {
-                return Err("Microsoft 授权被取消或拒绝，请重新登录。".into());
-            }
-            break Ok::<_, String>(url.to_string());
-        }
-    }).await.map_err(|_| "登录超时，请重新尝试。".to_string())?
-}
-
-fn open_browser(url: &str) -> Result<(), String> {
-    #[cfg(windows)]
-    let mut command = {
-        use std::os::windows::process::CommandExt;
-        let mut command = std::process::Command::new("rundll32.exe");
-        command
-            .args(["url.dll,FileProtocolHandler", url])
-            .creation_flags(0x08000000);
-        command
-    };
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = std::process::Command::new("open");
-        command.arg(url);
-        command
-    };
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    let mut command = {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(url);
-        command
-    };
-    command
-        .spawn()
-        .map_err(|e| format!("无法打开登录浏览器：{e}"))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -644,7 +709,7 @@ mod tests {
             uuid: "uuid".into(),
         });
         write_index(&path, index.clone()).await.unwrap();
-        write_index(&path, index).await.unwrap(); // Replacing an existing index must work on Windows.
+        write_index(&path, index).await.unwrap();
         assert_eq!(
             read_index(path.clone())
                 .await
@@ -662,70 +727,47 @@ mod tests {
     }
 
     #[test]
-    fn callback_only_accepts_loopback_http() {
-        assert!(callback_address("http://localhost:53682/oauth/callback").is_ok());
-        for url in [
-            "https://example.com/callback",
-            "http://0.0.0.0/callback",
-            "file:///tmp/token",
-            "http://localhost/?code=x",
-            "http://localhost:0/oauth/callback",
-            "http://localhost:53682/oauth/../admin",
-            "http://localhost:53682/",
-            "http://localhost:53682/oauth/callback#fragment",
-            "http://user:pass@localhost:53682/oauth/callback",
-        ] {
-            assert!(callback_address(url).is_err());
-        }
-    }
-
-    #[tokio::test]
-    async fn loopback_callback_rejects_wrong_state_then_accepts_matching_response() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let redirect = url::Url::parse(&format!("http://{address}/oauth/callback")).unwrap();
-        let receiver =
-            tokio::spawn(
-                async move { receive_callback(listener, &redirect, "expected-state").await },
-            );
-        for (target, status) in [
-            (
-                "/oauth/callback?code=test-code&state=wrong-state",
-                "400 Bad Request",
-            ),
-            ("/oauth/callback?state=expected-state", "400 Bad Request"),
-            (
-                "/oauth/callback/evil?code=test-code&state=expected-state",
-                "400 Bad Request",
-            ),
-            (
-                "/oauth/../oauth/callback?code=test-code&state=expected-state",
-                "400 Bad Request",
-            ),
-            (
-                "/oauth/callback?code=test-code&state=expected%2Dstate",
-                "200 OK",
-            ),
-        ] {
-            let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
-            let request = format!("GET {target} HTTP/1.1\r\nHost: {address}\r\n\r\n");
-            client.write_all(request.as_bytes()).await.unwrap();
-            let mut response = String::new();
-            tokio::time::timeout(Duration::from_secs(5), client.read_to_string(&mut response))
-                .await
-                .unwrap()
-                .unwrap();
-            assert!(response.starts_with(&format!("HTTP/1.1 {status}")));
-        }
-        let callback = receiver.await.unwrap().unwrap();
-        assert!(callback.contains("code=test-code"));
-    }
-
-    #[test]
     fn starts_without_fake_accounts_and_reports_publisher_configuration() {
         let state = State::default();
         assert!(state.index.current().is_none());
         assert!(state.index.accounts.is_empty());
         assert_eq!(state.has_microsoft_app(), state.provider.is_ok());
+    }
+    #[test]
+    fn mode_switch_and_cancel_reset_state() {
+        let mut state = State::default();
+        assert_eq!(state.login_mode, LoginMode::Browser);
+        
+        let _ = state.update(Message::SwitchMode(LoginMode::DeviceCode));
+        assert_eq!(state.login_mode, LoginMode::DeviceCode);
+
+        state.auth_url = Some("https://example.com/auth".into());
+        state.device_code = Some(DeviceCodeStart {
+            user_code: "ABCD".into(),
+            device_code: "DC123".into(),
+            verification_uri: "https://microsoft.com/link".into(),
+            expires_in: 900,
+            interval: 5,
+            message: None,
+        });
+        state.copied_feedback = Some("已复制".into());
+        state.logging_in = true;
+
+        let _ = state.update(Message::CancelLogin);
+        assert!(!state.logging_in);
+        assert!(state.auth_url.is_none());
+        assert!(state.device_code.is_none());
+        assert!(state.copied_feedback.is_none());
+    }
+
+    #[test]
+    fn adding_offline_account_updates_index_and_description() {
+        let mut state = State::default();
+        state.busy = false;
+        state.offline_input = "Alex".into();
+        let _ = state.update(Message::AddOffline);
+        assert_eq!(state.name(), "Alex");
+        assert!(state.description().contains("离线"));
+        assert!(state.index.current().unwrap().is_offline());
     }
 }

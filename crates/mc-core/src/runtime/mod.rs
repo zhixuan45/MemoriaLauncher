@@ -12,8 +12,9 @@ mod rules;
 mod scanner;
 
 pub use auth::{
-    AuthAccount, AuthProvider, AuthSession, CredentialStore, LoginStart, MemoryCredentialStore,
-    MicrosoftAuthConfig, MicrosoftAuthProvider, StoredCredential, UnavailableAuthProvider,
+    offline_uuid, AuthAccount, AuthProvider, AuthSession, CredentialStore, DeviceCodeStart,
+    DevicePollResult, LoginStart, MemoryCredentialStore, MicrosoftAuthConfig,
+    MicrosoftAuthProvider, OfflineAuthProvider, StoredCredential, UnavailableAuthProvider,
 };
 pub use install::install_vanilla;
 pub use java::JavaRuntime;

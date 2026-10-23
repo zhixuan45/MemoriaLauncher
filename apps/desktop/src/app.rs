@@ -322,9 +322,16 @@ impl Launcher {
                 let provider = match &self.accounts.provider {
                     Ok(provider) => provider.clone(),
                     Err(e) => {
-                        self.status = e.clone();
-                        self.open_modal(Modal::Profile);
-                        return Task::none();
+                        if account.is_offline() {
+                            crate::accounts::Provider::new(
+                                mc_core::MicrosoftAuthConfig::offline_dummy(),
+                                std::sync::Arc::new(crate::credentials::SystemCredentialStore),
+                            )
+                        } else {
+                            self.status = e.clone();
+                            self.open_modal(Modal::Profile);
+                            return Task::none();
+                        }
                     }
                 };
                 self.launching = true;
