@@ -98,6 +98,13 @@ pub struct ResourceCatalog {
     base: String,
 }
 impl ResourceCatalog {
+    pub(crate) async fn metadata(&self, path: &str) -> LauncherResult<serde_json::Value> {
+        self.get(path, &[]).await
+    }
+    #[cfg(test)]
+    pub(crate) fn with_base(base: String) -> Self {
+        let mut value = Self::new().unwrap(); value.base = base; value
+    }
     pub fn new() -> LauncherResult<Self> {
         super::online_catalog::init_tls_crypto();
         let client = reqwest::Client::builder()

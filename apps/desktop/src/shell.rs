@@ -34,8 +34,8 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
     ].width(Fill).height(Fill);
     let shell: Element<'_, Message> = container(column![
         titlebar(app), row![crate::sidebar::view(app), main].height(Fill)
-    ].height(Fill)).style(|_| container::Style {
-        background: Some(theme::BACKGROUND.into()), text_color: Some(WHITE), ..Default::default()
+    ].height(Fill)).style(|theme: &iced::Theme| container::Style {
+        background: Some(Color { a: if app.appearance.saved.wallpaper.is_some() { app.appearance.saved.dim as f32/100. } else {1.}, ..theme.palette().background }.into()), text_color: Some(WHITE), ..Default::default()
     }).into();
     // Preserve the shell tree (focus and scroll positions) when a modal comes/goes.
     let overlay = app
@@ -43,6 +43,7 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
         .map(|modal| modal_view(app, modal))
         .unwrap_or_else(|| Space::new().into());
     stack![
+        app.appearance.saved.wallpaper.as_ref().map(|path| -> Element<'_,Message> {iced::widget::image(iced::widget::image::Handle::from_path(path)).width(Fill).height(Fill).content_fit(ContentFit::Cover).into()}).unwrap_or_else(||Space::new().width(Fill).height(Fill).into()),
         crate::motion::fade(shell, 1.0, app.modal.is_none()),
         overlay
     ]
@@ -70,8 +71,8 @@ fn titlebar(app: &Launcher) -> Element<'_, Message> {
     }
     controls = controls.push(icon_button(Icon::Minimize, Message::Minimize))
         .push(icon_button(Icon::Maximize, Message::Maximize)).push(icon_button(Icon::Close, Message::Close));
-    container(controls).padding([0, 8]).height(42).width(Fill).style(|_| container::Style {
-        background: Some(theme::SIDEBAR.into()), border: iced::Border { color: theme::LINE, width: 1., ..Default::default() }, ..Default::default()
+    container(controls).padding([0, 8]).height(42).width(Fill).style(|theme: &iced::Theme| container::Style {
+        background: Some(theme::shade(theme, -0.02).into()), border: iced::Border { color: theme::shade(theme, 0.10), width: 1., ..Default::default() }, ..Default::default()
     }).into()
 }
 
@@ -99,6 +100,7 @@ fn workspace_toolbar(app: &Launcher) -> Element<'_, Message> {
             .and_then(|p| app.instances.iter().find(|i| i.instance.id == p.instance_id))
     } else { app.current() };
     if let Some(instance) = target {
+        controls=controls.push(button(label("管理实例",11.)).padding(8).style(theme::quiet).on_press_maybe((!app.instance_writing()).then_some(Message::EditInstance)));
         controls = controls.push(button(row![icon(Icon::Play, GREEN, 13.), label("启动实例", 11.)].spacing(7).align_y(Alignment::Center))
             .padding(8).style(theme::quiet).on_press_maybe(crate::sidebar::can_launch(app, instance).then_some(Message::LaunchInstance(app.environment.game_root.clone(), instance.instance.id.clone()))));
     }
@@ -111,11 +113,12 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
     let mut content = column![row![
         bold(
             match modal {
-                Modal::Instance => "实例信息",
+                Modal::Instance => "实例管理",
                 Modal::Changelog => "更新日志",
                 Modal::Feature => "精选内容",
                 Modal::Profile => "账户管理",
                 Modal::Crash => "实例异常退出",
+                Modal::ResourceInstall => "安装第三方资源",
             },
             22.
         ),
@@ -145,20 +148,10 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
             }
         }
         Modal::Instance => {
-            if let Some(i) = app.current() {
-                content = content
-                    .push(bold(i.instance.name.clone(), 26.))
-                    .push(label(
-                        format!("{} · {} · {}", i.loader, i.instance.mc_version, i.java),
-                        14.,
-                    ))
-                    .push(
-                        label(i.instance.game_dir.to_string_lossy().into_owned(), 13.).color(MUTED),
-                    )
-                    .push(
-                        label("此面板目前展示实例信息；实例配置保存尚未接入。", 13.).color(MUTED),
-                    );
-            }
+            content=content.push(crate::instance_settings::view(&app.instance_settings,app.launching||app.resource_install.busy||app.download.installing.is_some()));
+        }
+        Modal::ResourceInstall => {
+            content=content.push(crate::resource_install::view(&app.resource_install,app.launching||app.instance_settings.busy||app.download.installing.is_some()||!crate::local::same_root(&app.resource_install.root,&app.environment.game_root)));
         }
         Modal::Changelog => {
             content = content.push(label("当前开发版本已实现的功能。", 12.).color(MUTED));
@@ -184,7 +177,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
         Modal::Profile => {
             if let Some(feedback) = &app.accounts.copied_feedback {
                 content = content.push(
-                    container(label(feedback, 12.).color(GREEN))
+                    container(label(feedback, 12.).style(theme::accent_text))
                         .padding([4, 8])
                         .style(theme::panel),
                 );
@@ -305,7 +298,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                         content = content.push(
                             row![
                                 bold("验证网址：", 13.),
-                                label(verify_url, 13.).color(GREEN),
+                                label(verify_url, 13.).style(theme::accent_text),
                             ]
                             .spacing(6)
                             .align_y(Alignment::Center),
@@ -505,8 +498,8 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
     }
     let dialog = container(scrollable(content).direction(theme::scroll_direction()))
         .padding(24)
-        .width(580)
-        .max_height(640)
+        .width(if matches!(modal,Modal::Instance|Modal::ResourceInstall){760}else{580})
+        .max_height((app.viewport.height-60.).min(640.))
         .style(theme::panel);
     let progress = app.modal_motion.value(app.animation_time);
     let interactive = app.modal_motion.target() == 1.0;

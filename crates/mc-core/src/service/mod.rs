@@ -5,6 +5,8 @@ pub mod instance_write;
 pub mod online_catalog;
 pub mod mcp_policy;
 pub mod resources;
+pub mod desktop_instances;
+pub mod resource_install;
 pub mod task;
 
 pub use catalog::*;

@@ -841,7 +841,7 @@ fn memory_card(state: &State, enabled: bool) -> Element<'_, AppMessage> {
                         .unwrap_or_else(|| "待计算".into()),
                     17.
                 )
-                .color(GREEN)
+                .style(theme::accent_text)
                 .width(Fill),
             ],
         ]

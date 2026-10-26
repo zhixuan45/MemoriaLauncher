@@ -22,6 +22,7 @@ pub struct LaunchOptions {
     pub max_memory_mb: u32,
     pub resolution: Option<(u32, u32)>,
     pub verify_hashes: bool,
+    pub extra_jvm_args: Vec<String>,
 }
 
 impl Default for LaunchOptions {
@@ -32,6 +33,7 @@ impl Default for LaunchOptions {
             max_memory_mb: 4096,
             resolution: None,
             verify_hashes: true,
+            extra_jvm_args: Vec::new(),
         }
     }
 }
@@ -399,6 +401,7 @@ fn build_plan(
         format!("-Xms{}M", options.min_memory_mb),
         format!("-Xmx{}M", options.max_memory_mb),
     ];
+    arguments.extend(options.extra_jvm_args.iter().cloned());
     let (parent, id) = key
         .split_once('/')
         .ok_or_else(|| LauncherError::UnsafePath(key.into()))?;

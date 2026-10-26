@@ -40,6 +40,8 @@ async fn populated() -> Launcher {
         .into_iter()
         .map(Into::into)
         .collect();
+    // MockInstanceService uses a HashMap; keep fixture hit-testing and captures deterministic.
+    app.instances.sort_by(|a,b|a.instance.id.cmp(&b.instance.id));
     app.tasks = InMemoryTaskService::new()
         .with_sample_data()
         .await
@@ -832,3 +834,6 @@ mod captures;
 
 #[path = "workspace_ui_tests.rs"]
 mod workspace_ui;
+
+#[path = "instance_features_tests.rs"]
+mod instance_features;

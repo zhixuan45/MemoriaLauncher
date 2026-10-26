@@ -72,7 +72,7 @@ pub fn icon(kind: Icon, color: Color, size: f32) -> iced::widget::Svg<'static, i
             .or_insert_with(|| make_icon(kind, rgba))
             .clone()
     });
-    svg(handle).width(size).height(size)
+    svg(handle).width(size).height(size).style(move |theme: &iced::Theme,_| svg::Style {color:if color==crate::theme::GREEN {Some(theme.palette().primary)}else if color==Color::BLACK {Some(crate::theme::on_accent(theme.palette().primary))}else{None}})
 }
 
 fn make_icon(kind: Icon, rgba: [u8; 4]) -> svg::Handle {

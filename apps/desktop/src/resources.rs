@@ -1,6 +1,6 @@
 //! Modrinth search and version inspection. Catalogue requests never install files.
 use crate::motion_renderer::Element;
-use crate::theme::{self, bold, label, GREEN, MUTED};
+use crate::theme::{self, bold, label, MUTED};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text_input, Space};
 use iced::{Alignment, Fill, Task};
 use mc_core::{
@@ -26,6 +26,8 @@ pub enum Message {
     Select(String),
     Versions(u64, String, Result<Vec<ResourceVersion>, String>),
     CopyUrl,
+    Install(String),
+    InstallVersion(String),
 }
 pub struct State {
     pub query: String,
@@ -38,6 +40,7 @@ pub struct State {
     pub notice: String,
     pub selected: Option<String>,
     pub versions: Vec<ResourceVersion>,
+    install_version: Option<String>,
     detail_loading: bool,
     detail_notice: String,
     generation: u64,
@@ -57,6 +60,7 @@ impl Default for State {
             notice: String::new(),
             selected: None,
             versions: vec![],
+            install_version: None,
             detail_loading: false,
             detail_notice: String::new(),
             generation: 0,
@@ -66,6 +70,20 @@ impl Default for State {
     }
 }
 impl State {
+    pub fn install_selection(
+        &self,
+        version: &str,
+    ) -> Option<(ResourceKind, String, String, String)> {
+        let project = self.project()?;
+        self.versions.iter().find(|v| v.id == version).map(|v| {
+            (
+                self.kind,
+                project.project_id.clone(),
+                v.id.clone(),
+                format!("{} · {}", project.title, v.name),
+            )
+        })
+    }
     #[cfg(test)]
     pub(crate) fn test_generation(&self) -> u64 {
         self.generation
@@ -205,6 +223,8 @@ impl State {
                     return iced::clipboard::write(url.to_string());
                 }
             }
+            Message::Install(_) => {}
+            Message::InstallVersion(id) => self.install_version = Some(id),
         }
         Task::none()
     }
@@ -245,7 +265,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
                             format!("{} · {} 次下载", project.author, project.downloads),
                             10.
                         )
-                        .color(GREEN),
+                        .style(theme::accent_text),
                     ]
                     .spacing(6),
                 )
@@ -333,7 +353,7 @@ fn details(state: &State) -> Element<'_, Message> {
                     .style(theme::quiet)
                     .on_press(Message::CopyUrl),
             )
-            .push(label(&state.detail_notice, 12.).color(GREEN));
+            .push(label(&state.detail_notice, 12.).style(theme::accent_text));
         // Bound widget construction; the full filtered response is still counted above.
         for version in state.versions.iter().take(30) {
             let mut metadata = column![
@@ -347,7 +367,7 @@ fn details(state: &State) -> Element<'_, Message> {
                     ),
                     11.
                 )
-                .color(GREEN),
+                .style(theme::accent_text),
                 label(
                     format!("Minecraft {}", version.game_versions.join(" / ")),
                     11.
@@ -390,7 +410,7 @@ fn details(state: &State) -> Element<'_, Message> {
         }
         content = content.push(
             label(
-                "当前提供资源查询与版本文件预览；安装与依赖部署尚未接入。",
+                "选择资源版本后，可预览兼容性、必需依赖并确认安装到指定实例。",
                 11.,
             )
             .color(MUTED),
@@ -398,16 +418,56 @@ fn details(state: &State) -> Element<'_, Message> {
     } else {
         content = content.push(label("选择资源查看版本、文件及依赖。", 15.).color(MUTED));
     }
-    container(
-        scrollable(content)
-            .direction(theme::scroll_direction())
-            .height(Fill),
-    )
-    .padding(16)
-    .width(iced::Length::FillPortion(6))
-    .height(Fill)
-    .style(theme::panel)
-    .into()
+    let choices: Vec<_> = state
+        .versions
+        .iter()
+        .map(|v| VersionChoice {
+            id: v.id.clone(),
+            title: format!("{} · {}", v.name, v.version_number),
+        })
+        .collect();
+    let selected = choices
+        .iter()
+        .find(|v| Some(&v.id) == state.install_version.as_ref())
+        .or(choices.first())
+        .cloned();
+    let mut panel = column![scrollable(content)
+        .direction(theme::scroll_direction())
+        .height(Fill)]
+    .spacing(12);
+    if let Some(selected) = selected {
+        let id = selected.id.clone();
+        panel = panel
+            .push(
+                pick_list(choices, Some(selected), |v| Message::InstallVersion(v.id))
+                    .width(Fill)
+                    .text_size(12),
+            )
+            .push(
+                button(label("安装此资源版本", 12.))
+                    .padding(10)
+                    .width(Fill)
+                    .style(theme::action)
+                    .on_press(Message::Install(id)),
+            );
+    }
+    container(panel)
+        .padding(16)
+        .width(iced::Length::FillPortion(6))
+        .height(Fill)
+        .style(theme::panel)
+        .into()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct VersionChoice {
+    id: String,
+    title: String,
+}
+impl std::fmt::Display for VersionChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.title)
+    }
 }
 
 #[cfg(test)]

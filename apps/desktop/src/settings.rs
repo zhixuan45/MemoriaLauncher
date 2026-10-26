@@ -221,6 +221,8 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
         motion::pop(crate::download_settings::view(app), cards, true)
     } else if state.tab == AI_TAB {
         motion::pop(crate::ai_settings::view(app), cards, true)
+    } else if state.tab == 5 {
+        motion::pop(crate::appearance::view(&app.appearance), cards, true)
     } else {
         motion::pop(
             container(
@@ -281,6 +283,8 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
                     "下载源与并行下载数量保存在本机，保存后用于新的下载任务。"
                 } else if state.tab == AI_TAB {
                     "AI 配置保存在本机，保存后用于后续咨询与日志分析。"
+                } else if state.tab == 5 {
+                    "外观配置保存在本机，保存后立即应用。"
                 } else {
                     state.notice
                 },

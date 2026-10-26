@@ -4,6 +4,7 @@ members = [
     "apps/desktop",
     "crates/mc-mcp",
 ]
+default-members = ["apps/desktop"]
 resolver = "2"
 
 [workspace.dependencies]

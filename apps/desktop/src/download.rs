@@ -543,7 +543,7 @@ fn details(state: &State) -> Element<'_, Message> {
                     format!("{} · 原版 · {}", version_kind(v), v.java_version),
                     12.
                 )
-                .color(GREEN)
+                .style(theme::accent_text)
             ]
             .spacing(8)
         ]
@@ -552,7 +552,7 @@ fn details(state: &State) -> Element<'_, Message> {
         button(
             row![
                 icon(Icon::Download, iced::Color::BLACK, 20.),
-                bold("安装此版本", 16.).color(iced::Color::BLACK)
+                bold("安装此版本", 16.).style(theme::action_text)
             ]
             .spacing(12)
             .align_y(Alignment::Center)

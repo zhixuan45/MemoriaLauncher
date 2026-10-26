@@ -24,6 +24,7 @@ pub fn can_launch(app: &Launcher, instance: &InstanceEntry) -> bool {
         && !app.loading
         && !app.environment_saving
         && app.download.installing.is_none()
+        && !app.instance_writing()
 }
 pub fn art(instance: &InstanceEntry) -> &'static iced::widget::image::Handle {
     match instance.icon {
@@ -186,10 +187,10 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
             container(entry)
                 .padding([0, 3])
                 .width(Fill)
-                .style(move |_| {
+                .style(move |palette: &iced::Theme| {
                     if selected {
                         container::Style {
-                            background: Some(iced::Color::from_rgb(0.10, 0.15, 0.115).into()),
+                            background: theme::selected(palette,iced::widget::button::Status::Active).background,
                             border: iced::border::rounded(7),
                             ..Default::default()
                         }
@@ -304,8 +305,8 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
     .padding([16, 12])
     .width(width(app.viewport.width))
     .height(Fill)
-    .style(|_| container::Style {
-        background: Some(theme::SIDEBAR.into()),
+    .style(|palette: &iced::Theme| container::Style {
+        background: Some(theme::shade(palette, -0.02).into()),
         border: iced::Border {
             color: theme::LINE,
             width: 1.,

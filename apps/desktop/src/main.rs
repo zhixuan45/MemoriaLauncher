@@ -7,6 +7,9 @@ mod ai;
 mod ai_settings;
 mod api_client;
 mod app;
+mod appearance;
+mod instance_settings;
+mod resource_install;
 mod assets;
 mod attachments;
 mod attachments_view;
@@ -43,7 +46,8 @@ fn main() -> iced::Result {
     let size = verification::window_size();
     let application = iced::application(Launcher::new, Launcher::update, Launcher::view)
         .title("MC 启动器")
-        .theme(theme::launcher())
+        .theme(Launcher::theme)
+        .scale_factor(Launcher::scale_factor)
         .default_font(theme::FONT)
         .subscription(Launcher::subscription)
         .window(iced::window::Settings {

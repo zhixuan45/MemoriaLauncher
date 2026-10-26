@@ -16,6 +16,8 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | --- | --- |
 | 本地游戏库 | 扫描 `versions/` 与兼容的 `version/` 目录，读取版本、加载器、Java 要求与客户端 JAR 状态 |
 | 游戏设置 | 多个实例集文件夹；检测 Java 并从下拉列表选择或手动导入；自动分配内存或按总内存比例拖动滑块，配置保存后用于实际启动 |
+| 实例管理 | 独立名称、Java、内存、窗口尺寸和 JVM 参数；Mod 扫描、搜索、导入、启停与可恢复移除，配置存入实例 `.memoria/` |
+| 界面外观 | 深色底色、自定义主题色或跟随 Windows 系统强调色、缩放与 PNG 背景，保存后立即应用并持久化 |
 | 账户管理 | 系统浏览器 Microsoft OAuth 授权码 + PKCE 登录，支持添加、切换与退出账户 |
 | 登录应用设置 | 在 **设置 → 账户登录** 填写客户端 ID 和回调地址，保存后立即生效，重启自动读取 |
 | 游戏启动 | 使用所选账户刷新并验证会话，检查 Java 与本地依赖，启动 Java 进程并显示日志路径与退出状态 |
@@ -25,11 +27,12 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | 下载设置 | 官方、BMCLAPI 或自定义兼容镜像；支持 1–64 个并行下载，保存后新任务生效，重启保留 |
 | 本地统计 | 统计实例隔离目录内的 Mod JAR 数量；尚未记录的游玩时长显示“未记录” |
 | 第三方资源目录 | Modrinth 模组、整合包、资源包与光影搜索，支持版本/加载器筛选、分页，以及版本文件和依赖预览 |
+| 第三方资源安装 | 选择版本和目标实例、预览必需依赖与文件、确认安装、校验下载、备份与失败回滚；整合包要求已安装匹配游戏和加载器 |
 | 工作区 | 主页、实例项目与独立对话列表；每个项目右端可直接启动对应实例 |
 | AI 对话 | 条形输入框、多对话切换、连续追问；加号添加实例日志上下文、图片、文本/配置及 PDF |
 | MCP 服务 | AI 设置中配置内置 stdio 服务，选择读取/写入权限和授权实例；服务端执行并动态重读权限 |
 
-**尚未完成：** 第三方加载器与资源安装、依赖求解、AI 自动组包与汉化、安装变更审批与事务部署、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。界面不会为这些功能生成虚构的成功结果或下载进度。
+**尚未完成：** 第三方加载器自动安装、通用依赖兼容性求解、AI 自动组包与汉化、跨文件崩溃自动恢复、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。实例管理、外观及资源安装用法见[功能说明](docs/instance-management.md)。
 
 ## 本地运行
 
@@ -38,8 +41,10 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 ```powershell
 git clone https://github.com/zhixuan45/MemoriaLauncher.git
 cd MemoriaLauncher
-cargo run --locked -p desktop
+cargo run --locked
 ```
+
+根目录默认运行 `desktop` 桌面客户端；运行 MCP 服务时请显式指定 `-p mc-mcp`。
 
 首次使用：
 

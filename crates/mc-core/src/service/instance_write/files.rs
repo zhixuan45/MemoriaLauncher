@@ -233,8 +233,8 @@ pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     file.sync_all().map_err(io_error)
 }
 pub fn lock(base: &Path) -> Result<fs::File> {
-    create_dirs(base, ".launcher/mcp")?;
-    let path = safe_join(base, ".launcher/mcp/write.lock")?;
+    create_dirs(base, ".memoria/mcp")?;
+    let path = safe_join(base, ".memoria/mcp/write.lock")?;
     let file = fs::OpenOptions::new()
         .read(true)
         .write(true)

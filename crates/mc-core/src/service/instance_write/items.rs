@@ -256,6 +256,7 @@ pub fn import_registry(root: &Path, instance: &str, source: &Path) -> Result<Val
     })
     .map_err(invalid)?;
     let target = files::safe_join(&base, CACHE)?;
+    files::create_dirs(&base, ".launcher/mcp")?;
     let temp = target.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
     files::write_new(&temp, &bytes)?;
     std::fs::rename(&temp, &target).map_err(io_error)?;

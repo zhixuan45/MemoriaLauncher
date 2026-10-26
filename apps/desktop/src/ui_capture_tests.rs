@@ -70,10 +70,11 @@ async fn capture_chat_and_resource_catalogue() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "writes page inventory screenshots; set MEMORIA_UI_CAPTURE_DIR"]
 async fn capture_pages() {
     let mut app = populated().await;
     let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
+    std::fs::create_dir_all(&dir).unwrap();
     let _ = app.update(Message::Animate(
         app.animation_time + crate::motion::PAGE_DURATION,
     ));
@@ -88,6 +89,97 @@ async fn capture_pages() {
                 .matches_image(path)
                 .unwrap();
         }
+        app.page = Page::Settings;
+        for (index, title) in [
+            "常规",
+            "游戏设置",
+            "下载安装",
+            "环境配置",
+            "AI 设置",
+            "界面外观",
+            "高级设置",
+            "账户登录",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let messages = click(&mut app, title);
+            assert!(
+                messages.iter().any(|message| matches!(
+                    message,
+                    Message::Settings(crate::settings::Message::Tab(tab)) if *tab == index
+                )),
+                "{title} at {size:?}"
+            );
+            for message in messages {
+                let _ = app.update(message);
+            }
+            let _ = app.update(Message::Animate(
+                app.animation_time + crate::motion::PAGE_DURATION,
+            ));
+            simulator(&app)
+                .snapshot(&crate::theme::launcher())
+                .unwrap()
+                .matches_image(format!("{dir}/settings-{index}-{}.png", size.width))
+                .unwrap();
+        }
+        app.page = Page::Download;
+        for (index, title) in crate::download::CATEGORIES.into_iter().enumerate() {
+            let messages = click(&mut app, title);
+            assert!(messages.iter().any(|message| matches!(
+                message,
+                Message::Download(crate::download::Message::Category(category)) if *category == index
+            )), "{title} at {size:?}");
+            for message in messages {
+                // Catalogue requests stay unpolled: this capture is an offline UI audit.
+                let _ = app.update(message);
+            }
+            if index != 0 {
+                let generation = app.download.resources.test_generation();
+                let _ = app.update(Message::Download(crate::download::Message::Resources(
+                    crate::resources::Message::Loaded(
+                        generation,
+                        Ok(mc_core::ResourcePage {
+                            hits: vec![],
+                            total_hits: 0,
+                            offset: 0,
+                            limit: 20,
+                        }),
+                    ),
+                )));
+            }
+            simulator(&app)
+                .snapshot(&crate::theme::launcher())
+                .unwrap()
+                .matches_image(format!("{dir}/download-{index}-{}.png", size.width))
+                .unwrap();
+        }
+        for message in click(&mut app, "游戏版本") {
+            let _ = app.update(message);
+        }
+        for (index, title) in ["版本介绍", "版本文件", "配置要求", "相关资源"]
+            .into_iter()
+            .enumerate()
+        {
+            let messages = click(&mut app, title);
+            assert!(
+                messages.iter().any(|message| matches!(
+                    message,
+                    Message::Download(crate::download::Message::Tab(tab)) if *tab == index
+                )),
+                "{title} at {size:?}"
+            );
+            for message in messages {
+                let _ = app.update(message);
+            }
+            simulator(&app)
+                .snapshot(&crate::theme::launcher())
+                .unwrap()
+                .matches_image(format!("{dir}/version-{index}-{}.png", size.width))
+                .unwrap();
+        }
+        // Keep each viewport's top-level captures independent of the previous tabs.
+        app.settings = Default::default();
     }
 }
 

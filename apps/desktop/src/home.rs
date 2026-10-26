@@ -574,7 +574,7 @@ fn featured(app: &Launcher) -> Element<'_, Message> {
                 ),
                 button(
                     row![
-                        bold("了解详情", 12.).color(Color::BLACK),
+                        bold("了解详情", 12.).style(theme::action_text),
                         icon(Icon::Right, Color::BLACK, 13.)
                     ]
                     .spacing(8)

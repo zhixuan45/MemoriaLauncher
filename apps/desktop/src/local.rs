@@ -248,7 +248,7 @@ impl GameExit {
 }
 
 pub async fn scan(root: PathBuf) -> Result<LocalData, String> {
-    let layout = GameLayout::new(root).map_err(|e| e.to_string())?;
+    let layout = GameLayout::new(&root).map_err(|e| e.to_string())?;
     let report = LocalClientService::new(layout.clone())
         .scan()
         .await
@@ -276,7 +276,14 @@ pub async fn scan(root: PathBuf) -> Result<LocalData, String> {
         report
             .clients
             .into_iter()
-            .map(InstanceEntry::from)
+            .map(|client| {
+                let config = mc_core::service::desktop_instances::load_settings(&root, &client.instance.id);
+                let mut entry = InstanceEntry::from(client);
+                if let Ok(config) = config {
+                    if !config.name.is_empty() { entry.instance.name = config.name; }
+                }
+                entry
+            })
             .collect()
     })
     .await
@@ -298,14 +305,25 @@ pub fn launch(
             2,
             move |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
                 let result = async {
-                    let java = mc_core::JavaRuntime::inspect(&environment.java).await?;
+                    let config = mc_core::service::desktop_instances::load_settings(&environment.game_root, &key)
+                        .map_err(mc_core::LauncherError::InvalidMetadata)?;
+                    let java_path = config.java.as_ref().unwrap_or(&environment.java);
+                    let java = mc_core::JavaRuntime::inspect(java_path).await?;
                     let memory =
                         tokio::task::spawn_blocking(crate::runtime_memory::MemorySnapshot::read)
                             .await
                             .map_err(|e| mc_core::LauncherError::Internal(e.to_string()))?;
-                    let options = environment
+                    let mut effective = environment.clone();
+                    effective.java = java_path.clone();
+                    if let Some(value) = config.memory_mb {
+                        effective.memory_mode = crate::runtime_memory::MemoryMode::Fixed;
+                        effective.max_memory_mb = value;
+                        effective.min_memory_mb = effective.min_memory_mb.min(value);
+                    }
+                    let mut options = effective
                         .resolved_launch_options(memory, &java.arch)
                         .map_err(mc_core::LauncherError::JavaUnavailable)?;
+                    config.apply(&mut options).map_err(mc_core::LauncherError::InvalidMetadata)?;
                     let layout = GameLayout::new(environment.game_root)?;
                     let launcher = GameLauncher::new(layout, Arc::new(provider));
                     launcher

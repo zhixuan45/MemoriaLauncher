@@ -78,6 +78,8 @@ pub fn save(app: &mut Launcher, screenshot: window::Screenshot) -> Task<Message>
                 4 => "ai",
                 5 => "settings-aligned",
                 6 => "instance-dialog",
+                8 => "appearance",
+                9 => "instance-mods",
                 _ => "restored",
             }
         ))
@@ -168,7 +170,7 @@ pub fn next(app: &mut Launcher) -> Task<Message> {
         6 => {
             let _ = app.update(Message::Navigate(Page::Home));
             let _ = app.update(Message::ResetLayout);
-            let _ = app.update(Message::EditInstance);
+            return Task::batch([app.update(Message::EditInstance),delayed(Message::Capture)]);
         }
         7 => {
             let _ = app.update(Message::Dismiss);
@@ -183,6 +185,16 @@ pub fn next(app: &mut Launcher) -> Task<Message> {
                 .iter()
                 .all(|l| l.visible && l.offset == iced::Vector::ZERO));
             assert!(app.tasks.iter().all(|t| !t.paused));
+        }
+        8 => {
+            let _=app.update(Message::Navigate(Page::Settings));
+            let _=app.update(Message::Settings(crate::settings::Message::Tab(5)));
+        }
+        9 => {
+            let _=app.update(Message::Navigate(Page::Home));
+            let task=app.update(Message::EditInstance);
+            let _=app.update(Message::InstanceSettings(crate::instance_settings::Message::Tab(true)));
+            return Task::batch([task,delayed(Message::Capture)]);
         }
         _ => {
             println!("UI smoke checks passed.");
