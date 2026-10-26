@@ -1,7 +1,10 @@
 pub mod catalog;
 pub mod downloads;
 pub mod instance;
+pub mod instance_write;
 pub mod online_catalog;
+pub mod mcp_policy;
+pub mod resources;
 pub mod task;
 
 pub use catalog::*;

@@ -2,9 +2,10 @@
 name = "mc-mcp"
 version = "0.1.0"
 edition = "2021"
-description = "Read-only Minecraft tools via MCP stdio"
+description = "Permission-scoped Minecraft tools via MCP stdio"
 
 [dependencies]
 mc-core = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }

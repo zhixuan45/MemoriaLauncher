@@ -1,10 +1,15 @@
 //! MCP stdio server. stdout carries JSON-RPC only; all diagnostics go to stderr.
-use mc_core::{list_instance_logs, read_instance_log, GameLayout, LocalClientService, OnlineCatalog, MAX_LOG_BYTES};
+use mc_core::service::mcp_policy::{policy_path, McpPolicy};
+use mc_core::{
+    list_instance_logs, read_instance_log, GameLayout, LocalClientService, OnlineCatalog,
+    MAX_LOG_BYTES,
+};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 const PROTOCOL: &str = "2025-06-18";
+mod write_tools;
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +20,10 @@ async fn main() {
 }
 
 fn game_root() -> PathBuf {
-    if let Some(arg) = std::env::args().skip(1).find_map(|arg| arg.strip_prefix("--game-root=").map(str::to_owned)) {
+    if let Some(arg) = std::env::args()
+        .skip(1)
+        .find_map(|arg| arg.strip_prefix("--game-root=").map(str::to_owned))
+    {
         return PathBuf::from(arg);
     }
     if let Some(root) = std::env::var_os("MEMORIA_GAME_ROOT") {
@@ -36,18 +44,33 @@ fn game_root() -> PathBuf {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let catalog = OnlineCatalog::new()?;
     let root = game_root();
-    let mut lines = BufReader::new(io::stdin()).lines();
+    let mut lines = BufReader::new(io::stdin());
     let mut out = io::stdout();
-    while let Some(line) = lines.next_line().await? {
-        if line.len() > 1024 * 1024 {
-            eprintln!("Memoria MCP: input line too large");
-            break;
-        }
+    let mut managed_policy = false;
+    while let Some(line) = bounded_line(&mut lines).await? {
         if line.trim().is_empty() {
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => dispatch(request, &catalog, &root).await,
+            Ok(request) => match McpPolicy::read(&policy_path()) {
+                Ok(None) if managed_policy => request.get("id").map(|id| {
+                    error(
+                        id.clone(),
+                        -32001,
+                        "Saved MCP permissions are missing; access remains blocked.",
+                    )
+                }),
+                Ok(policy) => {
+                    managed_policy |= policy.is_some();
+                    dispatch_with_policy(request, &catalog, &root, policy.as_ref()).await
+                }
+                Err(error_message) => {
+                    managed_policy = true;
+                    request
+                        .get("id")
+                        .map(|id| error(id.clone(), -32001, &error_message))
+                }
+            },
             Err(_) => Some(error(Value::Null, -32700, "Parse error")),
         };
         if let Some(response) = response {
@@ -124,14 +147,20 @@ fn tool_definitions() -> Value {
 }
 
 fn string_arg<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
-    v.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+    v.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
 }
 
 fn usize_arg(v: &Value, key: &str, default: usize, max: usize) -> Result<usize, &'static str> {
     match v.get(key) {
         None => Ok(default),
-        Some(v) => v.as_u64().filter(|n| *n > 0 && *n <= max as u64)
-            .map(|n| n as usize).ok_or("limit must be a positive integer within range"),
+        Some(v) => v
+            .as_u64()
+            .filter(|n| *n > 0 && *n <= max as u64)
+            .map(|n| n as usize)
+            .ok_or("limit must be a positive integer within range"),
     }
 }
 
@@ -151,31 +180,32 @@ async fn call_tool(name: &str, args: &Value, catalog: &OnlineCatalog, root: &Pat
         "minecraft_list_versions" => {
             let n = verify_args(args, &["limit"]).and_then(|_| usize_arg(args, "limit", 20, 100));
             match n {
-                Ok(n) => catalog.list_versions(n).await.map_err(|e| ("CATALOG_UNAVAILABLE".into(), e.to_string())),
+                Ok(n) => catalog
+                    .list_versions(n)
+                    .await
+                    .map_err(|e| ("CATALOG_UNAVAILABLE".into(), e.to_string())),
                 Err(e) => Err(("INVALID_ARGUMENT".into(), e.into())),
             }
         }
-        "minecraft_list_instances" => {
-            match verify_args(args, &[]) {
-                Err(e) => Err(("INVALID_ARGUMENT".into(), e.into())),
-                Ok(()) => match GameLayout::new(root) {
+        "minecraft_list_instances" => match verify_args(args, &[]) {
+            Err(e) => Err(("INVALID_ARGUMENT".into(), e.into())),
+            Ok(()) => match GameLayout::new(root) {
+                Err(e) => Err(("LOCAL_SCAN_FAILED".into(), e.to_string())),
+                Ok(layout) => match LocalClientService::new(layout).scan().await {
                     Err(e) => Err(("LOCAL_SCAN_FAILED".into(), e.to_string())),
-                    Ok(layout) => match LocalClientService::new(layout).scan().await {
-                        Err(e) => Err(("LOCAL_SCAN_FAILED".into(), e.to_string())),
-                        Ok(report) => {
-                            let clients: Vec<Value> = report.clients.iter().map(|c| json!({
+                    Ok(report) => {
+                        let clients: Vec<Value> = report.clients.iter().map(|c| json!({
                                 "id": c.instance.id, "name": c.instance.name,
                                 "minecraft_version": c.instance.mc_version,
                                 "loader": c.instance.loader, "client_jar_present": c.client_jar_present,
                                 "java_major": c.java_major
                             })).collect();
-                            Ok(json!({"source": "local_scan", "instances": clients,
+                        Ok(json!({"source": "local_scan", "instances": clients,
                                 "warning_count": report.issues.len()}))
-                        }
                     }
-                }
-            }
-        }
+                },
+            },
+        },
         "minecraft_search_mods" => {
             match verify_args(args, &["query", "minecraft_version", "loader", "limit"]) {
                 Err(e) => Err(("INVALID_ARGUMENT".into(), e.into())),
@@ -183,31 +213,50 @@ async fn call_tool(name: &str, args: &Value, catalog: &OnlineCatalog, root: &Pat
                     Some(q) if q.len() <= 120 => {
                         let version = string_arg(args, "minecraft_version");
                         let loader = string_arg(args, "loader");
-                        let allowed_loader = loader.map(|s| matches!(s, "fabric" | "forge" | "neoforge" | "quilt")).unwrap_or(true);
-                        if !allowed_loader || version.map(|v| v.len() > 40 || !v.bytes().all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c))).unwrap_or(false) {
-                            Err(("INVALID_ARGUMENT".into(), "invalid game version or loader".into()))
+                        let allowed_loader = loader
+                            .map(|s| matches!(s, "fabric" | "forge" | "neoforge" | "quilt"))
+                            .unwrap_or(true);
+                        if !allowed_loader
+                            || version
+                                .map(|v| {
+                                    v.len() > 40
+                                        || !v.bytes().all(|c| {
+                                            c.is_ascii_alphanumeric() || b".-_".contains(&c)
+                                        })
+                                })
+                                .unwrap_or(false)
+                        {
+                            Err((
+                                "INVALID_ARGUMENT".into(),
+                                "invalid game version or loader".into(),
+                            ))
                         } else {
                             match usize_arg(args, "limit", 10, 20) {
-                                Ok(n) => catalog.search_mods(q, version, loader, n).await
+                                Ok(n) => catalog
+                                    .search_mods(q, version, loader, n)
+                                    .await
                                     .map_err(|e| ("CATALOG_UNAVAILABLE".into(), e.to_string())),
                                 Err(e) => Err(("INVALID_ARGUMENT".into(), e.into())),
                             }
                         }
                     }
-                    _ => Err(("INVALID_ARGUMENT".into(), "query is required (max 120 bytes)".into())),
-                }
+                    _ => Err((
+                        "INVALID_ARGUMENT".into(),
+                        "query is required (max 120 bytes)".into(),
+                    )),
+                },
             }
         }
-        "minecraft_get_mod_info" => {
-            match verify_args(args, &["project_id"]) {
-                Err(e) => Err(("INVALID_ARGUMENT".into(), e.into())),
-                Ok(()) => match string_arg(args, "project_id") {
-                    Some(id) => catalog.get_mod_info(id).await
-                        .map_err(|e| ("CATALOG_UNAVAILABLE".into(), e.to_string())),
-                    None => Err(("INVALID_ARGUMENT".into(), "project_id is required".into())),
-                }
-            }
-        }
+        "minecraft_get_mod_info" => match verify_args(args, &["project_id"]) {
+            Err(e) => Err(("INVALID_ARGUMENT".into(), e.into())),
+            Ok(()) => match string_arg(args, "project_id") {
+                Some(id) => catalog
+                    .get_mod_info(id)
+                    .await
+                    .map_err(|e| ("CATALOG_UNAVAILABLE".into(), e.to_string())),
+                None => Err(("INVALID_ARGUMENT".into(), "project_id is required".into())),
+            },
+        },
         _ => Err(("UNKNOWN_TOOL".into(), "Unknown or unavailable tool".into())),
     };
     match result {
@@ -247,7 +296,18 @@ async fn call_log_tool(name: &str, args: &Value, root: &Path) -> Result<Value, (
     }
 }
 
+#[cfg(test)]
 async fn dispatch(request: Value, catalog: &OnlineCatalog, root: &Path) -> Option<Value> {
+    dispatch_with_policy(request, catalog, root, None).await
+}
+
+async fn dispatch_with_policy(
+    request: Value,
+    catalog: &OnlineCatalog,
+    root: &Path,
+    policy: Option<&McpPolicy>,
+) -> Option<Value> {
+    let root = policy.map(|p| p.game_root.as_path()).unwrap_or(root);
     let id = match request.get("id") {
         Some(id) => id.clone(),
         None => return None, // MCP notifications never receive replies
@@ -264,19 +324,72 @@ async fn dispatch(request: Value, catalog: &OnlineCatalog, root: &Path) -> Optio
             let requested = params["protocolVersion"].as_str().unwrap_or(PROTOCOL);
             let version = if ["2024-11-05", "2025-03-26", "2025-06-18"].contains(&requested) {
                 requested
-            } else { PROTOCOL };
-            response(id, json!({
-                "protocolVersion": version, "capabilities": {"tools": {"listChanged": false}},
-                "serverInfo": {"name": "memoria-mcp", "version": env!("CARGO_PKG_VERSION")}
-            }))
+            } else {
+                PROTOCOL
+            };
+            response(
+                id,
+                json!({
+                    "protocolVersion": version, "capabilities": {"tools": {"listChanged": false}},
+                    "serverInfo": {"name": "memoria-mcp", "version": env!("CARGO_PKG_VERSION")}
+                }),
+            )
         }
         "ping" => response(id, json!({})),
-        "tools/list" => response(id, json!({"tools": tool_definitions()})),
+        "tools/list" => {
+            let mut tools = tool_definitions();
+            if let Some(policy) = policy {
+                tools
+                    .as_array_mut()
+                    .unwrap()
+                    .extend(write_tools::definitions());
+                tools
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|tool| policy.allows_tool(tool["name"].as_str().unwrap_or_default()));
+            }
+            response(id, json!({"tools": tools}))
+        }
         "tools/call" => {
             match (params["name"].as_str(), params.get("arguments")) {
                 (Some(name), args) => {
                     let args = args.cloned().unwrap_or_else(|| json!({}));
-                    response(id, call_tool(name, &args, catalog, root).await)
+                    let denied = policy.is_some_and(|policy| {
+                        !policy.allows_tool(name)
+                            || (matches!(
+                                name,
+                                "minecraft_list_instance_logs" | "minecraft_read_instance_log"
+                            ) && !args
+                                .get("instance_id")
+                                .and_then(Value::as_str)
+                                .is_some_and(|key| policy.allows_instance(key)))
+                    });
+                    if denied {
+                        response(id, tool_error("PERMISSION_DENIED", "This tool or instance is not authorized in the launcher MCP settings."))
+                    } else {
+                        let mut result = if write_tools::is_tool(name) {
+                            write_tools::call(name, &args, policy).await
+                        } else {
+                            call_tool(name, &args, catalog, root).await
+                        };
+                        if name == "minecraft_list_instances" {
+                            if let Some(policy) = policy {
+                                if let Some(data) = result.get_mut("structuredContent") {
+                                    if let Some(instances) = data["instances"].as_array_mut() {
+                                        instances.retain(|instance| {
+                                            instance["id"]
+                                                .as_str()
+                                                .is_some_and(|key| policy.allows_instance(key))
+                                        });
+                                    }
+                                    data.as_object_mut().unwrap().remove("warning_count");
+                                    data["scope"] = json!("authorized_instances");
+                                    result = tool_result(data.clone());
+                                }
+                            }
+                        }
+                        response(id, result)
+                    }
                 }
                 _ => error(id, -32602, "Missing tool name"),
             }
@@ -405,4 +518,45 @@ mod tests {
             "INVALID_ARGUMENT"
         );
     }
+}
+
+#[cfg(test)]
+#[path = "policy_tests.rs"]
+mod policy_tests;
+
+// Base64 JAR uploads need larger frames; stop reading as soon as the bound is exceeded.
+async fn bounded_line<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+) -> std::io::Result<Option<String>> {
+    const MAX: usize = 48 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            break;
+        }
+        let count = available
+            .iter()
+            .position(|b| *b == b'\n')
+            .map(|n| n + 1)
+            .unwrap_or(available.len());
+        if bytes.len() + count > MAX {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "MCP frame exceeds 48 MiB",
+            ));
+        }
+        let end = available[count - 1] == b'\n';
+        bytes.extend_from_slice(&available[..count]);
+        reader.consume(count);
+        if end {
+            break;
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }

@@ -4,11 +4,11 @@
 
 **一个使用 Rust 与 iced 构建的 Minecraft Java Edition 桌面启动器。**
 
-管理本地游戏版本、通过 Microsoft 账户登录并启动游戏，也为外部 AI 客户端提供只读 MCP 工具。项目处于开发阶段，优先接入真实数据，并明确展示尚未完成的功能。
+管理本地游戏版本、通过 Microsoft 账户登录并启动游戏，也为外部 AI 客户端提供按类别和实例授权的 MCP 工具。项目处于开发阶段，优先接入真实数据，并明确展示尚未完成的功能。
 
-An independent Minecraft Java Edition launcher built with Rust and iced. It provides local instance discovery, Microsoft account authentication, authenticated game launching, and optional read-only MCP tools. This project is under active development and is not affiliated with or endorsed by Microsoft or Mojang Studios.
+An independent Minecraft Java Edition launcher built with Rust and iced. It provides local instance discovery, Microsoft account authentication, authenticated game launching, and optional permission-scoped MCP tools. This project is under active development and is not affiliated with or endorsed by Microsoft or Mojang Studios.
 
-[Microsoft 登录说明](docs/microsoft-login.md) · [API 申请与审核说明 / API review](docs/api-application.md) · [数据来源与配置](docs/real-data-integration.md) · [AI / MCP](docs/mcp.md)
+[Microsoft 登录说明](docs/microsoft-login.md) · [API 申请与审核说明 / API review](docs/api-application.md) · [数据来源与配置](docs/real-data-integration.md) · [AI / MCP](docs/mcp.md) · [后续开发进度](docs/development-progress.md) · [工作区界面](docs/workspace-ui.md)
 
 ## 已实现
 
@@ -24,10 +24,12 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | 下载安装 | 下载原版客户端、依赖库、原生库与资源，校验 SHA-1，安装后自动扫描到当前实例集 |
 | 下载设置 | 官方、BMCLAPI 或自定义兼容镜像；支持 1–64 个并行下载，保存后新任务生效，重启保留 |
 | 本地统计 | 统计实例隔离目录内的 Mod JAR 数量；尚未记录的游玩时长显示“未记录” |
-| AI 对话 | 可选的 Chat Completions 兼容接口，由用户提供地址、模型与 API Key；不自动执行本地操作 |
-| MCP 服务 | 通过 stdio 查询 Mojang 版本、Modrinth 项目、本地实例及实例日志，当前仅提供只读工具 |
+| 第三方资源目录 | Modrinth 模组、整合包、资源包与光影搜索，支持版本/加载器筛选、分页，以及版本文件和依赖预览 |
+| 工作区 | 主页、实例项目与独立对话列表；每个项目右端可直接启动对应实例 |
+| AI 对话 | 条形输入框、多对话切换、连续追问；加号添加实例日志上下文、图片、文本/配置及 PDF |
+| MCP 服务 | AI 设置中配置内置 stdio 服务，选择读取/写入权限和授权实例；服务端执行并动态重读权限 |
 
-**尚未完成：** 第三方加载器与整合包安装、桌面端第三方资源目录、AI 自动组包与汉化、安装变更审批与事务部署、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。界面不会为这些功能生成虚构的成功结果或下载进度。
+**尚未完成：** 第三方加载器与资源安装、依赖求解、AI 自动组包与汉化、安装变更审批与事务部署、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。界面不会为这些功能生成虚构的成功结果或下载进度。
 
 ## 本地运行
 
@@ -73,24 +75,28 @@ cargo build --locked -p desktop --release
 
 `系统浏览器 → Microsoft OAuth + PKCE → Xbox Live → XSTS → Minecraft Services → 权益与玩家档案校验 → 本地启动`
 
-OAuth 请求的 scope 为 `XboxLive.signin offline_access`。Microsoft 账户密码在微软登录页面输入，启动器不收集密码；应用不使用嵌入式客户端密码。Windows 刷新令牌保存在系统凭据管理器，账号索引与登录应用配置文件不包含令牌。AI 对话与只读 MCP 工具不接收 Microsoft/Minecraft 凭据。
+OAuth 请求的 scope 为 `XboxLive.signin offline_access`。Microsoft 账户密码在微软登录页面输入，启动器不收集密码；应用不使用嵌入式客户端密码。Windows 刷新令牌保存在系统凭据管理器，账号索引与登录应用配置文件不包含令牌。AI 对话与 MCP 工具不接收 Microsoft/Minecraft 凭据。
 
 **项目没有声称已获 Microsoft、Xbox 或 Minecraft API 批准。** 应用注册、相应服务的访问资格及真实账户端到端测试仍需由维护者完成。供审核人员查看的用途、权限、数据处理和代码入口见 [API 申请与审核说明](docs/api-application.md)。
 
 ## AI 与 MCP
 
-在“设置 → AI 设置”填写兼容接口地址、模型名称与 API Key，点击“保存并应用”后生效，重启自动读取。地址、模型与密钥引用保存在 `%LOCALAPPDATA%/MemoriaLauncher/ai.json`（支持 `MEMORIA_DATA_DIR` 覆盖目录），API Key 保存在 Windows 凭据管理器，不写入 JSON。清空密钥后保存可移除已存密钥；本机服务允许不使用密钥。“测试连接”使用当前填写的配置发送简短测试，不会保存配置。提示词、目标版本与输出语言会发送给用户选定的服务。当前 AI 对话不调用本地工具，也不会代替用户安装或修改实例。
+在“设置 → AI 设置”填写兼容接口地址、模型名称与 API Key，点击“保存并应用”后生效，重启自动读取。地址、模型与密钥引用保存在 `%LOCALAPPDATA%/MemoriaLauncher/ai.json`（支持 `MEMORIA_DATA_DIR` 覆盖目录），API Key 保存在 Windows 凭据管理器，不写入 JSON。清空密钥后保存可移除已存密钥；本机服务允许不使用密钥。“测试连接”使用当前填写的配置发送简短测试，不会保存配置。消息与最近最多 12 轮对话上下文会发送给用户选定的服务；可直接在消息中说明目标版本和输出语言。会话仅保存在本次运行内，清空会话会同时移除日志和文件附件。当前 AI 对话不调用本地工具，也不会代替用户安装或修改实例。
 
-实例以非零退出码或信号终止时，会弹出异常退出提示。点击 **启用 AI 分析** 会在 AI 页附加本次启动日志末尾（最多读取 64 KiB），点击 **发送** 才会交给所选服务；也可暂不分析或移除日志。常见凭据行会被遮蔽，但日志仍可能包含玩家名、本地路径等信息。顶部 **异常退出记录** 可重新打开最近一次提示。正常退出和启动前的校验失败不会触发该提示。
+实例以非零退出码或信号终止时，会弹出异常退出提示。点击 **启用 AI 分析** 会在 AI 页附加本次启动日志末尾（最多读取 64 KiB），点击 **发送** 才会交给所选服务；也可暂不分析或移除日志。常见凭据行会被遮蔽，但日志仍可能包含玩家名、本地路径等信息。原始日志附件只随本次确认的消息发送，不会作为后续对话上下文重复上传。顶部 **异常退出记录** 可重新打开最近一次提示。正常退出和启动前的校验失败不会触发该提示。
 
-单独构建只读 MCP 服务：
+在 **设置 → AI 设置 → MCP 服务器** 选择启用、允许的权限和实例并保存，再复制客户端连接配置。配置保存在 `mcp.json`，现有服务在下一次请求读取新权限。未保存该文件前，独立 CLI 保留原有只读行为。
+
+输入框的 **＋** 可启用当前实例日志上下文，或选择图片、UTF-8 文本/配置和 PDF；点击发送才上传。图片和 PDF 需要模型支持。最多 4 个文件、单个 4 MiB、合计 8 MiB，文本合计最多 48 KiB。详见 [工作区界面](docs/workspace-ui.md)。
+
+单独构建 MCP 服务：
 
 ```powershell
 cargo build --locked -p mc-mcp
 .\target\debug\mc-mcp.exe --game-root=C:\Games\.minecraft
 ```
 
-提供 `minecraft_list_versions`、`minecraft_list_instances`、`minecraft_search_mods`、`minecraft_get_mod_info`、`minecraft_list_instance_logs`、`minecraft_read_instance_log` 六个工具。客户端配置与参数示例见 [MCP 文档](docs/mcp.md)。
+默认提供 `minecraft_list_versions`、`minecraft_list_instances`、`minecraft_search_mods`、`minecraft_get_mod_info`、`minecraft_list_instance_logs`、`minecraft_read_instance_log` 六个只读工具。保存授权后可使用来源 ID / JAR 安装、配置写入、FTB 语义化任务和图片写入；先预览再按哈希应用。任务图标、条件和奖励均校验实际物品注册表。客户端配置见 [MCP 文档](docs/mcp.md)，写入格式与限制见 [实例写入](docs/mcp-writes.md)。
 
 ## 配置与凭据
 
@@ -124,7 +130,7 @@ cargo test --locked -p mc-core official_catalog_is_reachable -- --ignored
 | --- | --- |
 | `apps/desktop` | iced 界面、账户与设置、本地启动、可选 AI 对话 |
 | `crates/mc-core` | 领域模型、认证、目录查询、游戏扫描与启动服务 |
-| `crates/mc-mcp` | 只读 MCP stdio 服务 |
+| `crates/mc-mcp` | 按权限授权的 MCP stdio 服务 |
 | `crates/vendor/mc-launcher-core` | 随仓库保留的第三方启动库及本地修改 |
 | `docs` | 认证、API 审核、MCP、架构与配置说明 |
 

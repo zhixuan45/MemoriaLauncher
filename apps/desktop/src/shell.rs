@@ -2,7 +2,7 @@ use crate::app::{Launcher, Message, Modal, Page};
 use crate::assets::{icon, picture, Icon, ART};
 use crate::models::{CHANGELOG, FEATURE_DESCRIPTIONS, FEATURE_TITLES};
 use crate::motion_renderer::Element;
-use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
+use crate::theme::{self, bold, label, GREEN, MUTED, WHITE};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text_input, Space};
 use iced::{Alignment, Background, Color, ContentFit, Fill};
 
@@ -29,20 +29,14 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
         ),
         outgoing.unwrap_or_else(|| Space::new().into())
     ];
-    let main = stack![
-        iced::widget::image(ART.wallpaper.clone())
-            .width(Fill)
-            .height(Fill)
-            .content_fit(ContentFit::Fill),
-        column![titlebar(app), page].width(Fill).height(Fill)
-    ];
-    let shell: Element<'_, Message> = container(row![sidebar(app), main].height(Fill))
-        .style(|_| container::Style {
-            background: Some(Color::from_rgb(0.02, 0.055, 0.07).into()),
-            text_color: Some(WHITE),
-            ..Default::default()
-        })
-        .into();
+    let main = column![workspace_toolbar(app), page,
+        container(label(&app.status, 10.).color(MUTED)).padding([4, 24]).height(26)
+    ].width(Fill).height(Fill);
+    let shell: Element<'_, Message> = container(column![
+        titlebar(app), row![crate::sidebar::view(app), main].height(Fill)
+    ].height(Fill)).style(|_| container::Style {
+        background: Some(theme::BACKGROUND.into()), text_color: Some(WHITE), ..Default::default()
+    }).into();
     // Preserve the shell tree (focus and scroll positions) when a modal comes/goes.
     let overlay = app
         .modal
@@ -60,192 +54,57 @@ fn page_view(app: &Launcher, page: Page, cards: f32) -> Element<'_, Message> {
         Page::Home => crate::home::view(app, cards),
         Page::Settings => crate::settings::view(app, cards),
         Page::Download => crate::download::view(&app.download, cards).map(Message::Download),
-        Page::Ai => crate::ai::view(
-            &app.ai,
-            app.viewport.width - 194.,
-            cards,
-            app.animation_time,
-        )
-        .map(Message::Ai),
+        Page::Ai => crate::chat_view::view(&app.ai, &app.workspace.current, cards).map(Message::Ai),
     }
 }
 
 fn titlebar(app: &Launcher) -> Element<'_, Message> {
-    let status = if app.edit_layout && app.page == Page::Home {
-        "拖动卡片标题移动 · 右下角缩放 · 16px 网格吸附"
-    } else {
-        &app.status
-    };
-    let drag = mouse_area(
-        container(label(status, 10.).color(MUTED))
-            .width(Fill)
-            .height(40)
-            .align_y(Alignment::Center),
-    )
-    .on_press(Message::DragWindow)
-    .on_double_click(Message::Maximize);
-    let mut controls = row![drag].align_y(Alignment::Center).spacing(6);
+    let brand = mouse_area(container(row![
+        picture(&ART.grass, 22.), bold("Memoria", 14.),
+        label("/", 14.).color(MUTED), label("Minecraft 工作空间", 11.).color(MUTED),
+    ].spacing(12).align_y(Alignment::Center)).padding([0, 16]).width(Fill).height(42).align_y(Alignment::Center))
+        .on_press(Message::DragWindow).on_double_click(Message::Maximize);
+    let mut controls = row![brand].spacing(4).align_y(Alignment::Center);
     if app.crash.is_some() {
-        controls = controls.push(
-            button(label("异常退出记录", 10.))
-                .on_press(Message::ShowCrash)
-                .style(theme::quiet)
-                .padding([5, 8]),
-        );
+        controls = controls.push(button(label("异常退出记录", 10.)).padding(8).style(theme::quiet).on_press(Message::ShowCrash));
     }
-    if app.page == Page::Home {
-        if app.edit_layout || app.layouts.iter().any(|l| !l.visible) {
-            controls = controls.push(
-                button(label("恢复布局", 10.))
-                    .on_press(Message::ResetLayout)
-                    .style(theme::quiet),
-            );
-        }
-        controls = controls.push(
-            button(
-                row![
-                    icon(Icon::Edit, if app.edit_layout { GREEN } else { MUTED }, 12.),
-                    label(
-                        if app.edit_layout {
-                            "完成布局"
-                        } else {
-                            "编辑布局"
-                        },
-                        10.
-                    )
-                ]
-                .spacing(5)
-                .align_y(Alignment::Center),
-            )
-            .on_press(Message::ToggleLayout)
-            .style(theme::quiet)
-            .padding([5, 8]),
-        );
-    }
-    controls = controls
-        .push(icon_button(Icon::Bell, Message::Changelogs))
-        .push(icon_button(Icon::Minimize, Message::Minimize))
-        .push(icon_button(Icon::Maximize, Message::Maximize))
-        .push(icon_button(Icon::Close, Message::Close));
-    container(controls).padding([0, 10]).height(40).into()
+    controls = controls.push(icon_button(Icon::Minimize, Message::Minimize))
+        .push(icon_button(Icon::Maximize, Message::Maximize)).push(icon_button(Icon::Close, Message::Close));
+    container(controls).padding([0, 8]).height(42).width(Fill).style(|_| container::Style {
+        background: Some(theme::SIDEBAR.into()), border: iced::Border { color: theme::LINE, width: 1., ..Default::default() }, ..Default::default()
+    }).into()
 }
 
-fn sidebar(app: &Launcher) -> Element<'_, Message> {
-    let brand = mouse_area(
-        container(
-            row![
-                picture(&ART.grass, 47.),
-                column![
-                    bold("MC 启动器", 21.),
-                    label("探索 · 创造 · 更多可能", 10.).color(MUTED)
-                ]
-                .spacing(4)
-            ]
-            .spacing(7)
-            .align_y(Alignment::Center),
-        )
-        .padding([15, 12]),
-    )
-    .on_press(Message::DragWindow)
-    .on_double_click(Message::Maximize);
-    let mut nav = column![brand, Space::new().height(4)].spacing(14);
-    for page in Page::ALL {
-        let kind = match page {
-            Page::Home => Icon::Home,
-            Page::Download => Icon::Download,
-            Page::Ai => Icon::Spark,
-            Page::Settings => Icon::Settings,
-        };
-        let active = app.page == page;
-        let tint = if page == Page::Ai {
-            PURPLE
-        } else if active {
-            GREEN
-        } else {
-            Color::from_rgb(0.72, 0.79, 0.92)
-        };
-        let item = button(
-            row![icon(kind, tint, 27.), bold(page.title(), 16.)]
-                .spacing(20)
-                .align_y(Alignment::Center),
-        )
-        .width(Fill)
-        .padding([15, 20])
-        .on_press(Message::Navigate(page))
-        .style(move |theme, status| {
-            if active {
-                let mut style = theme::selected(theme, status);
-                if page == Page::Ai {
-                    style.border.color = PURPLE;
-                    style.background = Some(Color::from_rgba(0.36, 0.18, 0.53, 0.60).into());
-                }
-                style
-            } else {
-                let mut style = theme::quiet(theme, status);
-                if !matches!(status, button::Status::Hovered) {
-                    style.background = None;
-                    style.border.width = 0.;
-                }
-                style
-            }
-        });
-        nav = nav.push(container(item).padding([0, 10]));
+fn workspace_toolbar(app: &Launcher) -> Element<'_, Message> {
+    let title = match app.page { Page::Ai => app.workspace.current.project.as_ref().map(|p| p.name.as_str()).unwrap_or("Minecraft"), _ => app.page.title() };
+    let mut controls = row![icon(if app.page == Page::Ai { Icon::Cube } else { Icon::Home }, MUTED, 16.),
+        label(title, 12.), label("/", 12.).color(MUTED),
+        label(if app.page == Page::Ai { &app.workspace.current.title } else { "工作空间" }, 11.).color(MUTED),
+        Space::new().width(Fill),
+    ].spacing(10).align_y(Alignment::Center);
+    if app.page == Page::Home {
+        controls = controls.push(button(label(if app.edit_layout { "完成布局" } else { "编辑布局" }, 11.))
+            .padding(8).style(theme::quiet).on_press(Message::ToggleLayout));
+        if app.edit_layout || app.layouts.iter().any(|l| !l.visible) {
+            controls = controls.push(button(label("恢复布局", 11.)).on_press(Message::ResetLayout).style(theme::quiet));
+        }
     }
-    nav = nav
-        .push(Space::new().height(Fill))
-        .push(
-            container(
-                column![
-                    label("让方块的世界", 19.),
-                    label("拥有更多可能", 19.),
-                    container(Space::new().width(70).height(2)).style(|_| container::Style {
-                        background: Some(GREEN.into()),
-                        ..Default::default()
-                    }),
-                ]
-                .spacing(7),
-            )
-            .padding([12, 23]),
-        )
-        .push(
-            container(
-                button(
-                    row![
-                        icon(Icon::Gamepad, GREEN, 18.),
-                        column![
-                            label(app.accounts.name(), 12.),
-                            label(app.accounts.description(), 9.).color(MUTED)
-                        ],
-                        Space::new().width(Fill),
-                        icon(Icon::Right, MUTED, 12.)
-                    ]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
-                )
-                .on_press(Message::Profile)
-                .style(theme::quiet)
-                .padding(10)
-                .width(Fill),
-            )
-            .padding([0, 12]),
-        )
-        .push(container(label("v0.1.0  /  iced", 10.).color(MUTED)).padding([9, 23]));
-    container(stack![
-        iced::widget::image(ART.sidebar.clone())
-            .width(194)
-            .height(Fill)
-            .content_fit(ContentFit::Fill),
-        container(nav)
-            .width(Fill)
-            .height(Fill)
-            .style(|_| container::Style {
-                background: Some(Color::from_rgba(0.01, 0.045, 0.07, 0.35).into()),
-                ..Default::default()
-            })
-    ])
-    .width(194)
-    .height(Fill)
-    .into()
+    if app.page == Page::Ai {
+        controls = controls.push(button(label("清空会话", 11.)).padding(8).style(theme::quiet)
+            .on_press_maybe((!app.ai.busy && !app.ai.loading_log && !app.ai.attachments.loading()).then_some(Message::Ai(crate::ai::Message::Clear))))
+            .push(button(label("AI 设置", 11.)).padding(8).style(theme::quiet).on_press(Message::Ai(crate::ai::Message::OpenSettings)));
+    }
+    let target = if app.page == Page::Ai {
+        app.workspace.current.project.as_ref().filter(|p| p.matches(&app.environment.game_root, &app.active))
+            .and_then(|p| app.instances.iter().find(|i| i.instance.id == p.instance_id))
+    } else { app.current() };
+    if let Some(instance) = target {
+        controls = controls.push(button(row![icon(Icon::Play, GREEN, 13.), label("启动实例", 11.)].spacing(7).align_y(Alignment::Center))
+            .padding(8).style(theme::quiet).on_press_maybe(crate::sidebar::can_launch(app, instance).then_some(Message::LaunchInstance(app.environment.game_root.clone(), instance.instance.id.clone()))));
+    }
+    container(controls).padding([0, 24]).height(48).width(Fill).style(|_| container::Style {
+        border: iced::Border { color: theme::LINE, width: 1., ..Default::default() }, ..Default::default()
+    }).into()
 }
 
 fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {

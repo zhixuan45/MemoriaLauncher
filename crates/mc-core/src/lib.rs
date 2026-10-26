@@ -25,5 +25,9 @@ pub use service::{
     },
     instance::{InstanceService, MockInstanceService},
     online_catalog::OnlineCatalog,
+    resources::{
+        ResourceCatalog, ResourceKind, ResourcePage, ResourceProject, ResourceQuery,
+        ResourceVersion,
+    },
     task::{InMemoryTaskService, TaskService},
 };

@@ -17,6 +17,10 @@ reqwest = { version = "0.13.3", default-features = false, features = ["json", "q
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 regex = "1.13"
 sha1 = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
+toml_edit = { version = "0.25", default-features = false, features = ["parse"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 zip = { version = "6", default-features = false, features = ["deflate"] }
 url = "2.5"
 mc-launcher-core = { path = "../vendor/mc-launcher-core" }

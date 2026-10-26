@@ -3,12 +3,14 @@ use crate::motion_renderer::Element;
 use iced::widget::{button, container, text};
 use iced::{border, Background, Border, Color, Font, Theme};
 
-pub const GREEN: Color = Color::from_rgb(0., 0.91, 0.67);
-pub const WHITE: Color = Color::from_rgb(0.90, 0.94, 0.97);
-pub const MUTED: Color = Color::from_rgb(0.52, 0.62, 0.68);
-pub const PURPLE: Color = Color::from_rgb(0.73, 0.47, 0.94);
-pub const LINE: Color = Color::from_rgba(0.31, 0.48, 0.55, 0.23);
-pub const PANEL: Color = Color::from_rgba(0.025, 0.075, 0.10, 0.94);
+pub const GREEN: Color = Color::from_rgb(0.22, 0.79, 0.56);
+pub const WHITE: Color = Color::from_rgb(0.89, 0.92, 0.90);
+pub const MUTED: Color = Color::from_rgb(0.51, 0.56, 0.53);
+pub const PURPLE: Color = GREEN;
+pub const LINE: Color = Color::from_rgb(0.16, 0.19, 0.17);
+pub const PANEL: Color = Color::from_rgb(0.075, 0.09, 0.08);
+pub const BACKGROUND: Color = Color::from_rgb(0.065, 0.078, 0.070);
+pub const SIDEBAR: Color = Color::from_rgb(0.048, 0.059, 0.052);
 pub const FONT: Font = Font::with_name("Microsoft YaHei");
 
 pub fn label<'a>(
@@ -46,7 +48,7 @@ pub fn panel(_: &Theme) -> container::Style {
 
 pub fn surface(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(Color::from_rgba(0.035, 0.095, 0.12, 0.68).into()),
+        background: Some(Color::from_rgb(0.10, 0.12, 0.105).into()),
         border: Border {
             color: LINE,
             width: 1.,
@@ -57,14 +59,21 @@ pub fn surface(_: &Theme) -> container::Style {
 }
 
 pub fn action(_: &Theme, status: button::Status) -> button::Style {
+    let disabled = matches!(status, button::Status::Disabled);
     let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: Some(Background::Color(if hovered {
-            Color::from_rgb(0.22, 1., 0.77)
+        background: Some(Background::Color(if disabled {
+            Color::from_rgb(0.12, 0.22, 0.17)
+        } else if hovered {
+            Color::from_rgb(0.29, 0.87, 0.64)
         } else {
             GREEN
         })),
-        text_color: Color::from_rgb(0.01, 0.10, 0.09),
+        text_color: if disabled {
+            MUTED
+        } else {
+            Color::from_rgb(0.025, 0.09, 0.055)
+        },
         border: border::rounded(9),
         ..Default::default()
     }
@@ -72,32 +81,51 @@ pub fn action(_: &Theme, status: button::Status) -> button::Style {
 
 pub fn quiet(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
-        background: Some(
-            if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                Color::from_rgba(0.2, 0.37, 0.43, 0.55).into()
-            } else {
-                Color::from_rgba(0.03, 0.09, 0.12, 0.7).into()
-            },
-        ),
-        text_color: WHITE,
-        border: Border {
-            color: LINE,
-            width: 1.,
-            radius: 8.into(),
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then_some(Color::from_rgb(0.12, 0.15, 0.13).into()),
+        text_color: if matches!(status, button::Status::Disabled) {
+            MUTED
+        } else {
+            WHITE
         },
+        border: border::rounded(7),
         ..Default::default()
     }
 }
 
 pub fn selected(_: &Theme, _: button::Status) -> button::Style {
     button::Style {
-        background: Some(Color::from_rgba(0., 0.39, 0.29, 0.60).into()),
-        border: Border {
-            color: GREEN,
-            width: 1.,
-            radius: 9.into(),
-        },
+        background: Some(Color::from_rgb(0.11, 0.17, 0.13).into()),
+        border: border::rounded(7),
         text_color: WHITE,
+        ..Default::default()
+    }
+}
+
+pub fn input(
+    theme: &Theme,
+    status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    let mut style = iced::widget::text_input::default(theme, status);
+    style.background = Color::from_rgb(0.09, 0.11, 0.095).into();
+    style.border = Border {
+        color: LINE,
+        width: 1.,
+        radius: 8.into(),
+    };
+    style.value = WHITE;
+    style.placeholder = MUTED;
+    style
+}
+
+pub fn composer(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Color::from_rgb(0.105, 0.13, 0.113).into()),
+        border: Border {
+            color: Color::from_rgb(0.20, 0.25, 0.215),
+            width: 1.,
+            radius: 16.into(),
+        },
         ..Default::default()
     }
 }
@@ -109,7 +137,7 @@ pub fn pill(value: impl Into<String>, active: bool) -> Element<'static, Message>
             background: Some(if active {
                 Color::from_rgba(0., 0.6, 0.4, 0.14).into()
             } else {
-                Color::from_rgba(0.1, 0.16, 0.2, 0.65).into()
+                Color::from_rgb(0.12, 0.15, 0.13).into()
             }),
             border: border::rounded(16),
             ..Default::default()
@@ -131,7 +159,7 @@ pub fn launcher() -> Theme {
     Theme::custom(
         "Memoria",
         iced::theme::Palette {
-            background: Color::from_rgb(0.025, 0.065, 0.085),
+            background: BACKGROUND,
             text: WHITE,
             primary: GREEN,
             success: GREEN,

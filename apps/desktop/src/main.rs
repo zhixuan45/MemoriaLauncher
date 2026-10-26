@@ -8,23 +8,33 @@ mod ai_settings;
 mod api_client;
 mod app;
 mod assets;
+mod attachments;
+mod attachments_view;
+#[cfg(test)]
+mod chat_tests;
+mod chat_view;
 mod credentials;
+mod dashboard;
 mod download;
 mod download_settings;
 mod game_settings;
 mod home;
-mod java_environment;
 #[cfg(test)]
 mod interaction_tests;
+mod java_environment;
 mod local;
+mod mcp_settings;
 mod models;
 mod motion;
 mod motion_renderer;
+mod resources;
 mod runtime_memory;
 mod settings;
 mod shell;
+mod sidebar;
 mod theme;
 mod verification;
+mod workspace;
 
 use app::Launcher;
 

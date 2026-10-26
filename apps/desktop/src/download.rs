@@ -3,9 +3,9 @@ use crate::assets::{icon, picture, Icon, ART};
 use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, WHITE};
 use iced::widget::{
-    button, column, container, pick_list, progress_bar, row, scrollable, text_input, Space,
+    button, column, container, pick_list, progress_bar, row, scrollable, text_input,
 };
-use iced::{Alignment, ContentFit, Fill, Length, Task};
+use iced::{Alignment, Fill, Length, Task};
 use mc_core::{
     DownloadClient, DownloadProgress, DownloadSettings, GameVersion, GameVersionType,
     MojangCatalogProvider,
@@ -21,13 +21,13 @@ const TABS: [&str; 4] = ["版本介绍", "版本文件", "配置要求", "相关
 #[derive(Debug, Clone)]
 pub enum Message {
     Category(usize),
+    Resources(crate::resources::Message),
     Search(String),
     VersionType(&'static str),
     Loader(&'static str),
     Sort(&'static str),
     Select(String),
     Tab(usize),
-    Banner(i32),
     Install(String),
     Loaded(Result<Vec<GameVersion>, String>),
     CatalogLoaded(u64, Result<Vec<GameVersion>, String>),
@@ -38,11 +38,11 @@ pub enum Message {
 
 pub struct State {
     pub category: usize,
+    pub resources: crate::resources::State,
     pub query: String,
     pub versions: Vec<GameVersion>,
     pub selected: Option<String>,
     pub tab: usize,
-    pub banner: usize,
     pub loading: bool,
     loaded: bool,
     version_type: &'static str,
@@ -63,11 +63,11 @@ impl State {
     pub fn new(config: DownloadSettings) -> Self {
         Self {
             category: 0,
+            resources: crate::resources::State::default(),
             query: String::new(),
             versions: vec![],
             selected: None,
             tab: 0,
-            banner: 0,
             loading: false,
             loaded: false,
             version_type: TYPES[1],
@@ -100,6 +100,9 @@ impl State {
     }
 
     pub fn ensure_loaded(&mut self) -> Task<Message> {
+        if self.category != 0 {
+            return self.resources.ensure_loaded().map(Message::Resources);
+        }
         if self.loading || self.loaded {
             return Task::none();
         }
@@ -151,8 +154,26 @@ impl State {
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Category(i) => self.category = i.min(CATEGORIES.len() - 1),
+            Message::Resources(message) => {
+                return self.resources.update(message).map(Message::Resources)
+            }
+            Message::Category(i) => {
+                self.category = i.min(CATEGORIES.len() - 1);
+                if self.category != 0 {
+                    return self
+                        .resources
+                        .category(self.category)
+                        .map(Message::Resources);
+                }
+                return self.ensure_loaded();
+            }
             Message::Search(v) => {
+                if self.category != 0 {
+                    return self
+                        .resources
+                        .update(crate::resources::Message::Query(v))
+                        .map(Message::Resources);
+                }
                 self.query = v;
                 self.reconcile_selection();
             }
@@ -171,9 +192,6 @@ impl State {
                 }
             }
             Message::Tab(i) => self.tab = i.min(TABS.len() - 1),
-            Message::Banner(delta) => {
-                self.banner = (self.banner as i32 + delta).rem_euclid(3) as usize
-            }
             Message::Install(id) => {
                 self.installing = Some(id.clone());
                 self.progress = None;
@@ -427,40 +445,34 @@ pub fn view(state: &State, cards: f32) -> Element<'_, Message> {
         .height(Fill)
         .into()
     } else {
-        crate::motion::pop(
-            container(
-                column![
-                    icon(Icon::Download, GREEN, 40.),
-                    bold(CATEGORIES[state.category], 24.),
-                    label("此资源目录尚未接入，当前可以浏览游戏版本。", 14.).color(MUTED),
-                    button(label("浏览游戏版本", 14.))
-                        .on_press(Message::Category(0))
-                        .style(theme::action)
-                        .padding(12)
-                ]
-                .spacing(20),
-            )
-            .padding(28)
-            .width(Fill)
-            .height(Fill)
-            .style(theme::panel),
-            cards,
-            true,
-        )
+        crate::resources::view(&state.resources).map(Message::Resources)
     };
     let mut content = column![
-        row![icon(Icon::Download, GREEN, 30.), bold("游戏下载", 32.)]
+        row![icon(Icon::Download, GREEN, 24.), bold("游戏下载", 26.)]
             .spacing(12)
             .align_y(Alignment::Center),
         label("选择版本、Mod 或整合包，快速开始你的冒险", 14.).color(MUTED),
-        text_input("搜索游戏版本 / Mod / 整合包…", &state.query)
-            .on_input(Message::Search)
-            .padding(12)
-            .size(14),
+        text_input(
+            "搜索游戏版本 / Mod / 整合包…",
+            if state.category == 0 {
+                &state.query
+            } else {
+                &state.resources.query
+            }
+        )
+        .style(theme::input)
+        .on_input(Message::Search)
+        .on_submit_maybe(
+            (state.category != 0).then_some(Message::Resources(crate::resources::Message::Search))
+        )
+        .padding(12)
+        .size(14),
         categories,
-        label(&state.notice, 11.).color(MUTED),
     ]
     .spacing(12);
+    if state.category == 0 || state.installing.is_some() {
+        content = content.push(label(&state.notice, 11.).color(MUTED));
+    }
     if let Some(progress) = &state.progress {
         content = content.push(
             progress_bar(
@@ -502,28 +514,8 @@ fn details(state: &State) -> Element<'_, Message> {
     let mut content = column![].spacing(12);
     if state.tab == 0 {
         content = content
-            .push(
-                container(
-                    iced::widget::image(ART.banners[[2, 0, 1][state.banner]].clone())
-                        .width(Fill)
-                        .height(150)
-                        .content_fit(ContentFit::Cover),
-                )
-                .width(Fill)
-                .height(150)
-                .clip(true),
-            )
-            .push(row![
-                button(icon(Icon::Left, WHITE, 12.))
-                    .on_press(Message::Banner(-1))
-                    .style(theme::quiet),
-                Space::new().width(Fill),
-                button(icon(Icon::Right, WHITE, 12.))
-                    .on_press(Message::Banner(1))
-                    .style(theme::quiet)
-            ])
             .push(label(&v.summary, 13.))
-            .push(bold("主要更新内容", 15.));
+            .push(bold("版本信息", 15.));
         for item in &v.highlights {
             content = content.push(label(format!("· {item}"), 12.).color(MUTED));
         }

@@ -16,12 +16,13 @@ pub enum Page {
 }
 
 impl Page {
+    #[cfg(test)]
     pub const ALL: [Self; 4] = [Self::Home, Self::Download, Self::Ai, Self::Settings];
     pub fn title(self) -> &'static str {
         match self {
             Self::Home => "主页",
             Self::Download => "游戏下载",
-            Self::Ai => "AI 功能",
+            Self::Ai => "AI 对话",
             Self::Settings => "设置",
         }
     }
@@ -85,12 +86,16 @@ pub enum Message {
     GameSettings(crate::game_settings::Message),
     DownloadSettings(crate::download_settings::Message),
     AiSettings(crate::ai_settings::Message),
+    McpSettings(crate::mcp_settings::Message),
     GameStarted(String),
     GameFinished(Result<crate::local::GameExit, String>),
     AnalyzeCrash,
     ShowCrash,
     Navigate(Page),
     SelectInstance(String),
+    LaunchInstance(std::path::PathBuf, String),
+    Workspace(crate::workspace::Message),
+    ChatReply(uuid::Uuid, crate::ai::Message),
     MoveInstance(String, i32),
     Launch,
     EditInstance,
@@ -149,7 +154,9 @@ pub struct Launcher {
     pub settings: crate::settings::State,
     pub download: crate::download::State,
     pub ai: crate::ai::State,
+    pub workspace: crate::workspace::State,
     pub ai_settings: crate::ai_settings::State,
+    pub mcp_settings: crate::mcp_settings::State,
     pub verification: verification::Verification,
 }
 
@@ -168,6 +175,7 @@ impl Launcher {
         let download_settings = crate::download_settings::State::load();
         let download = crate::download::State::new(download_settings.saved.clone());
         let ai_settings = crate::ai_settings::State::load();
+        let mcp_settings = crate::mcp_settings::State::load(&environment.game_root);
         let mut ai = crate::ai::State::default();
         ai.connection = ai_settings.saved.clone();
         let now = Instant::now();
@@ -204,7 +212,9 @@ impl Launcher {
             settings: crate::settings::State::default(),
             download,
             ai,
+            workspace: crate::workspace::State::default(),
             ai_settings,
+            mcp_settings,
             verification: verification::Verification::from_args(),
         };
         let task = Task::batch([state.load(), state.accounts.load().map(Message::Accounts)]);
@@ -283,6 +293,28 @@ impl Launcher {
                     self.active = id;
                 }
             }
+            Message::Workspace(message) => return crate::workspace::update(self, message),
+            Message::ChatReply(id, message) => {
+                return crate::workspace::update_ai(self, id, message)
+            }
+            Message::LaunchInstance(root, id) => {
+                if !crate::local::same_root(&root, &self.environment.game_root) {
+                    self.status = "实例集已变化，请从当前项目重新启动。".into();
+                    return Task::none();
+                }
+                if self.launching
+                    || self.loading
+                    || self.environment_saving
+                    || self.download.installing.is_some()
+                {
+                    return Task::none();
+                }
+                if !self.instances.iter().any(|i| i.instance.id == id) {
+                    return Task::none();
+                }
+                self.active = id;
+                return self.update(Message::Launch);
+            }
             Message::MoveInstance(id, delta) => {
                 if let Some(index) = self.instances.iter().position(|i| i.instance.id == id) {
                     let target =
@@ -360,11 +392,15 @@ impl Launcher {
             Message::AnalyzeCrash => {
                 if !self.ai.busy && !self.ai.loading_log {
                     if let Some(crash) = self.crash.clone() {
+                        let context = crate::workspace::project(self, &crash.instance_id)
+                            .filter(|p| crate::local::same_root(&p.root, &crash.game_root));
+                        self.workspace.new_chat(&mut self.ai, context);
                         let navigation = self.update(Message::Navigate(Page::Ai));
-                        let analysis = self
-                            .ai
-                            .update(crate::ai::Message::AnalyzeCrash(crash), self.animation_time)
-                            .map(Message::Ai);
+                        let analysis = crate::workspace::update_ai(
+                            self,
+                            self.workspace.current.id,
+                            crate::ai::Message::AnalyzeCrash(crash),
+                        );
                         return Task::batch([navigation, analysis]);
                     }
                 }
@@ -572,7 +608,16 @@ impl Launcher {
             Message::AiSettings(message) => {
                 let task = self.ai_settings.update(message).map(Message::AiSettings);
                 self.ai.connection = self.ai_settings.saved.clone();
+                for conversation in &mut self.workspace.others {
+                    conversation.state.connection = self.ai_settings.saved.clone();
+                }
                 return task;
+            }
+            Message::McpSettings(message) => {
+                return self
+                    .mcp_settings
+                    .update(message, &self.environment.game_root)
+                    .map(Message::McpSettings)
             }
             Message::Ai(crate::ai::Message::OpenSettings) => {
                 self.settings.update(
@@ -583,10 +628,7 @@ impl Launcher {
             }
             Message::Ai(message) => {
                 self.animation_time = Instant::now().max(self.animation_time);
-                return self
-                    .ai
-                    .update(message, self.animation_time)
-                    .map(Message::Ai);
+                return crate::workspace::update_ai(self, self.workspace.current.id, message);
             }
             Message::Capture => {
                 return window::latest()
@@ -624,7 +666,6 @@ impl Launcher {
             || self.card_motion.active(self.animation_time)
             || self.modal_motion.active(self.animation_time)
             || self.settings.animating(self.animation_time)
-            || self.ai.animating(self.animation_time)
     }
 
     fn open_modal(&mut self, modal: Modal) {

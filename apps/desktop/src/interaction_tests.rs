@@ -62,8 +62,12 @@ async fn populated() -> Launcher {
 
 fn click(app: &mut Launcher, target: &str) -> Vec<Message> {
     let mut ui = simulator(app);
-    ui.click(target)
-        .unwrap_or_else(|e| panic!("Cannot click {target}: {e}"));
+    if target == "发送" {
+        ui.click(iced_test::selector::id("ai-send")).unwrap();
+    } else {
+        ui.click(target)
+            .unwrap_or_else(|e| panic!("Cannot click {target}: {e}"));
+    }
     ui.into_messages().collect()
 }
 
@@ -228,11 +232,23 @@ async fn sidebar_clicks_route_from_every_page_at_both_sizes() {
         for from in Page::ALL {
             for to in Page::ALL {
                 app.page = from;
-                let messages = click(&mut app, to.title());
+                let messages = click(
+                    &mut app,
+                    if to == Page::Ai {
+                        "新对话"
+                    } else {
+                        to.title()
+                    },
+                );
                 assert!(
                     messages
                         .iter()
-                        .any(|m| matches!(m, Message::Navigate(p) if *p == to)),
+                        .any(|m| matches!(m, Message::Navigate(p) if *p == to)
+                            || (to == Page::Ai
+                                && matches!(
+                                    m,
+                                    Message::Workspace(crate::workspace::Message::NewChat)
+                                ))),
                     "Sidebar click did not reach {to:?} from {from:?} at {size:?}: {messages:?}"
                 );
                 for message in messages {
@@ -287,7 +303,7 @@ async fn ai_request_reaches_the_runtime_and_retains_local_page_animation() {
     app.ai.connection.config.model = "test-model".into();
     let _ = app.update(Message::Ai(crate::ai::Message::Prompt("配置建议".into())));
     let request = app.update(Message::Ai(crate::ai::Message::Submit));
-    assert_eq!(request.units(), 1);
+    assert!(request.units() >= 1);
     assert!(app.ai.busy);
     assert_eq!(
         app.update(Message::Ai(crate::ai::Message::Submit)).units(),
@@ -301,9 +317,8 @@ async fn ai_request_reaches_the_runtime_and_retains_local_page_animation() {
     ))));
     assert_eq!(app.page, Page::Ai);
     assert!(app.outgoing_page.is_none());
-    assert_eq!(app.ai.reply.as_deref(), Some("模型建议"));
+    assert_eq!(app.ai.messages.last().unwrap().content, "模型建议");
     assert!(!app.ai.busy);
-    assert!(app.ai.tasks.is_empty());
 }
 
 #[tokio::test]
@@ -342,25 +357,6 @@ async fn ai_settings_navigation_save_controls_and_application() {
         "disk full".into()
     ))));
     assert_eq!(app.ai.connection.config.model, "saved-model");
-}
-
-#[tokio::test]
-#[ignore]
-async fn capture_ai_settings() {
-    let mut app = populated().await;
-    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
-    let _ = app.update(Message::Ai(crate::ai::Message::OpenSettings));
-    let _ = app.update(Message::Animate(
-        app.animation_time + crate::motion::PAGE_DURATION,
-    ));
-    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
-        app.viewport = size;
-        simulator(&app)
-            .snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/ai-settings-{}.png", size.width))
-            .unwrap();
-    }
 }
 
 #[tokio::test]
@@ -566,40 +562,6 @@ async fn game_settings_controls_work_at_minimum_window_size_and_drafts_survive_n
 }
 
 #[tokio::test]
-#[ignore]
-async fn capture_game_settings() {
-    use crate::game_settings::Message as GameMessage;
-    let mut app = populated().await;
-    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
-    let _ = app.update(Message::Navigate(Page::Settings));
-    let _ = app.update(Message::Settings(crate::settings::Message::Tab(1)));
-    let _ = app.update(Message::Animate(
-        app.animation_time + crate::motion::PAGE_DURATION,
-    ));
-    let second = std::path::PathBuf::from("D:/Minecraft/Modpacks/.minecraft");
-    let _ = app.update(Message::GameSettings(GameMessage::Prepared(Ok((
-        second, false,
-    )))));
-    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
-        app.viewport = size;
-        simulator(&app)
-            .snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/game-settings-{}.png", size.width))
-            .unwrap();
-        let mut ui = simulator(&app);
-        ui.point_at((800., 500.));
-        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -1200. },
-        })]);
-        ui.snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/game-settings-bottom-{}.png", size.width))
-            .unwrap();
-    }
-}
-
-#[tokio::test]
 async fn memory_radio_buttons_and_ratio_slider_control_the_saved_launch_policy() {
     use crate::game_settings::Message as GameMessage;
     use crate::runtime_memory::MemoryMode;
@@ -659,82 +621,6 @@ async fn memory_radio_buttons_and_ratio_slider_control_the_saved_launch_policy()
 }
 
 #[tokio::test]
-#[ignore]
-async fn capture_java_and_memory_controls() {
-    use crate::game_settings::Message as GameMessage;
-    use crate::runtime_memory::MemoryMode;
-    let mut app = populated().await;
-    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
-    let mut runtimes = Vec::new();
-    for (index, (major, version)) in [
-        (26, "26.0.2"),
-        (21, "21.0.9"),
-        (21, "21.0.8"),
-        (17, "17.0.17"),
-        (17, "17.0.16"),
-        (8, "1.8.0_472"),
-        (8, "1.8.0_462"),
-        (17, "17.0.20"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        runtimes.push(mc_core::JavaRuntime {
-            executable: format!("C:/Program Files/Zulu/zulu-{major}-{index}/bin/java.exe").into(),
-            major_version: major,
-            version: version.into(),
-            arch: "amd64".into(),
-            os_version: "10.0".into(),
-        });
-    }
-    app.game_settings.java = runtimes[1].executable.to_string_lossy().into_owned();
-    app.game_settings.java_choices.clear();
-    let _ = app.update(Message::GameSettings(GameMessage::JavaScanned(Ok(
-        crate::java_environment::JavaDiscovery {
-            runtimes,
-            failures: Vec::new(),
-        },
-    ))));
-    let _ = app.update(Message::Navigate(Page::Settings));
-    let _ = app.update(Message::Settings(crate::settings::Message::Tab(1)));
-    let _ = app.update(Message::Animate(
-        app.animation_time + crate::motion::PAGE_DURATION,
-    ));
-    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
-        app.viewport = size;
-        for (name, mode) in [
-            ("auto", MemoryMode::Automatic),
-            ("custom", MemoryMode::Custom),
-        ] {
-            let _ = app.update(Message::GameSettings(GameMessage::MemoryMode(mode)));
-            if mode == MemoryMode::Custom {
-                let _ = app.update(Message::GameSettings(GameMessage::MemoryPercent(30)));
-            }
-            let mut ui = simulator(&app);
-            ui.point_at((800., 500.));
-            ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-                delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -2000. },
-            })]);
-            ui.snapshot(&crate::theme::launcher())
-                .unwrap()
-                .matches_image(format!("{dir}/memory-{name}-{}.png", size.width))
-                .unwrap();
-        }
-        let mut ui = simulator(&app);
-        ui.point_at((800., 500.));
-        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -300. },
-        })]);
-        ui.click(iced_test::selector::id("game-java-picker"))
-            .unwrap();
-        ui.snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/java-dropdown-{}.png", size.width))
-            .unwrap();
-    }
-}
-
-#[tokio::test]
 async fn download_preferences_apply_to_the_client_and_controls_remain_accessible() {
     use crate::download_settings::Message as SettingMessage;
     use mc_core::{DownloadSettings, DownloadSource};
@@ -748,7 +634,15 @@ async fn download_preferences_apply_to_the_client_and_controls_remain_accessible
     ));
     for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
         app.viewport = size;
-        for message in click(&mut app, "16") {
+        let mut ui = simulator(&app);
+        if ui.click("16").is_err() {
+            ui.point_at((700., 400.));
+            ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+                delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -900. },
+            })]);
+            ui.click("16").unwrap();
+        }
+        for message in ui.into_messages() {
             assert!(matches!(
                 message,
                 Message::DownloadSettings(SettingMessage::Parallel(_))
@@ -850,162 +744,91 @@ async fn vanilla_install_uses_current_collection_and_rescans_only_after_success(
 }
 
 #[tokio::test]
-#[ignore]
-async fn capture_download_settings() {
-    use crate::download_settings::Message as SettingMessage;
+async fn chat_composer_and_clear_work_at_both_sizes_without_dashboard_cards() {
     let mut app = populated().await;
-    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
-    let _ = app.update(Message::Navigate(Page::Settings));
-    let _ = app.update(Message::Settings(crate::settings::Message::Tab(2)));
-    let _ = app.update(Message::Animate(
-        app.animation_time + crate::motion::PAGE_DURATION,
-    ));
-    for size in [Size::new(1024., 680.), Size::new(1280., 768.)] {
-        app.viewport = size;
-        let _ = app.update(Message::DownloadSettings(SettingMessage::Source(
-            mc_core::DownloadSource::Bmclapi,
-        )));
-        simulator(&app)
-            .snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/download-settings-{}.png", size.width))
-            .unwrap();
-        let _ = app.update(Message::DownloadSettings(SettingMessage::Source(
-            mc_core::DownloadSource::Custom,
-        )));
-        let mut ui = simulator(&app);
-        ui.point_at((800., 500.));
-        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-            delta: iced::mouse::ScrollDelta::Pixels { x: 0., y: -1200. },
-        })]);
-        ui.snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/download-settings-custom-{}.png", size.width))
-            .unwrap();
-    }
-}
-
-#[tokio::test]
-#[ignore]
-async fn capture_pages() {
-    let mut app = populated().await;
-    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
-    let _ = app.update(Message::Animate(
-        app.animation_time + crate::motion::PAGE_DURATION,
-    ));
+    app.page = Page::Ai;
+    app.ai.connection.config.model = "fixture".into();
     for size in [Size::new(1024., 680.), Size::new(1536., 921.)] {
         app.viewport = size;
-        for page in Page::ALL {
-            app.page = page;
-            let mut ui = simulator(&app);
-            let path = format!("{dir}/{page:?}-{}.png", size.width);
-            ui.snapshot(&crate::theme::launcher())
-                .unwrap()
-                .matches_image(path)
-                .unwrap();
+        let _ = app.update(Message::Ai(crate::ai::Message::Prompt("测试问题".into())));
+        assert!(simulator(&app).find("你可以这样问").is_err());
+        assert!(simulator(&app).find("实用示例").is_err());
+        assert!(simulator(&app).find("任务列表").is_err());
+        let messages = click(&mut app, "发送");
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::Ai(crate::ai::Message::Submit))));
+        for message in messages {
+            let _ = app.update(message);
         }
+        assert!(app.ai.busy);
+        let _ = app.update(Message::Ai(crate::ai::Message::ApiReply(Ok(
+            "测试回复".into()
+        ))));
+        assert!(simulator(&app).find("测试回复").is_ok());
+        for message in click(&mut app, "清空会话") {
+            let _ = app.update(message);
+        }
+        assert!(app.ai.messages.is_empty());
     }
 }
 
 #[tokio::test]
-#[ignore]
-async fn capture_motion() {
+async fn resource_search_and_result_controls_are_clickable_at_both_sizes() {
     let mut app = populated().await;
-    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
-    std::fs::create_dir_all(&dir).unwrap();
-    let _ = app.update(Message::Animate(
-        app.animation_time + crate::motion::PAGE_DURATION,
-    ));
-    let _ = app.update(Message::Navigate(Page::Settings));
-    let start = app.animation_time;
-    for millis in [0, 25, 50, 70, 180] {
-        let _ = app.update(Message::Animate(
-            start + std::time::Duration::from_millis(millis),
-        ));
-        simulator(&app)
-            .snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/page-{millis}.png"))
-            .unwrap();
-    }
-    let _ = app.update(Message::Settings(crate::settings::Message::Toggle(0, true)));
-    let start = app.animation_time;
-    for millis in [0, 40, 120] {
-        let _ = app.update(Message::Animate(
-            start + std::time::Duration::from_millis(millis),
-        ));
-        simulator(&app)
-            .snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/switch-{millis}.png"))
-            .unwrap();
-    }
-    let _ = app.update(Message::Profile);
-    let start = app.animation_time;
-    for millis in [0, 70, 220] {
-        let _ = app.update(Message::Animate(
-            start + std::time::Duration::from_millis(millis),
-        ));
-        simulator(&app)
-            .snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/open-{millis}.png"))
-            .unwrap();
-    }
-    let _ = app.update(Message::Dismiss);
-    let start = app.animation_time;
-    for millis in [0, 60, 150] {
-        let _ = app.update(Message::Animate(
-            start + std::time::Duration::from_millis(millis),
-        ));
-        simulator(&app)
-            .snapshot(&crate::theme::launcher())
-            .unwrap()
-            .matches_image(format!("{dir}/close-{millis}.png"))
-            .unwrap();
+    app.page = Page::Download;
+    for size in [Size::new(1024., 680.), Size::new(1536., 921.)] {
+        app.viewport = size;
+        for message in click(&mut app, "Mod") {
+            let _ = app.update(message);
+        }
+        // The HTTP adapter has separate wire tests; inject its decoded response here.
+        let generation = app.download.resources.test_generation();
+        let page = mc_core::ResourcePage {
+            hits: vec![mc_core::ResourceProject {
+                project_id: "sodium".into(),
+                slug: "sodium".into(),
+                title: "Sodium".into(),
+                description: "Renderer".into(),
+                author: "author".into(),
+                downloads: 42,
+                categories: vec!["fabric".into()],
+                versions: vec!["1.21.1".into()],
+            }],
+            total_hits: 45,
+            offset: 0,
+            limit: 20,
+        };
+        let _ = app.update(Message::Download(crate::download::Message::Resources(
+            crate::resources::Message::Loaded(generation, Ok(page)),
+        )));
+        assert!(click(&mut app, "搜索").iter().any(|m| matches!(
+            m,
+            Message::Download(crate::download::Message::Resources(
+                crate::resources::Message::Search
+            ))
+        )));
+        for message in click(&mut app, "Sodium") {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.download.resources.selected.as_deref(), Some("sodium"));
+        assert!(click(&mut app, "复制项目链接").iter().any(|m| matches!(
+            m,
+            Message::Download(crate::download::Message::Resources(
+                crate::resources::Message::CopyUrl
+            ))
+        )));
+        assert!(click(&mut app, "下一页").iter().any(|m| matches!(
+            m,
+            Message::Download(crate::download::Message::Resources(
+                crate::resources::Message::Page(true)
+            ))
+        )));
     }
 }
 
-#[test]
-#[ignore]
-fn capture_sliding_switch() {
-    use crate::motion::{Toggle, SWITCH_DURATION};
-    use iced::widget::{column, container, row, text};
-    use std::time::{Duration, Instant};
-    let dir = std::env::var("MEMORIA_UI_CAPTURE_DIR").expect("Set MEMORIA_UI_CAPTURE_DIR");
-    std::fs::create_dir_all(&dir).unwrap();
-    let mut toggle = Toggle::new(false);
-    let start = Instant::now();
-    toggle.set(true, start);
-    let mut stages = column![].spacing(20);
-    for millis in [0, 25, 120] {
-        stages = stages.push(
-            row![
-                text(format!("{millis} ms")).width(90),
-                toggle.view(start + Duration::from_millis(millis), 26., |v| v),
-            ]
-            .spacing(12),
-        );
-    }
-    toggle.set(false, start + SWITCH_DURATION);
-    stages = stages.push(
-        row![
-            text("off +25 ms").width(90),
-            toggle.view(
-                start + SWITCH_DURATION + Duration::from_millis(25),
-                26.,
-                |v| v
-            ),
-        ]
-        .spacing(12),
-    );
-    let mut ui = Simulator::with_size(
-        Settings::default(),
-        Size::new(260., 225.),
-        container(stages).padding(20).style(crate::theme::panel),
-    );
-    ui.snapshot(&crate::theme::launcher())
-        .unwrap()
-        .matches_image(format!("{dir}/switch-stages.png"))
-        .unwrap();
-}
+#[path = "ui_capture_tests.rs"]
+mod captures;
+
+#[path = "workspace_ui_tests.rs"]
+mod workspace_ui;

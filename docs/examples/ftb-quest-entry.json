@@ -1,0 +1,15 @@
+{
+  "instance_id": "versions/my-pack",
+  "chapter": "getting_started",
+  "chapter_title": "起步",
+  "entry": {
+    "id": "gather_logs",
+    "parent": null,
+    "title": "收集木头",
+    "description": ["获得 16 个橡木原木。"],
+    "icon": "minecraft:oak_log",
+    "completion": [{ "type": "item", "item": "minecraft:oak_log", "count": 16 }],
+    "rewards": [{ "type": "item", "item": "minecraft:apple", "count": 4 }],
+    "position": { "x": 0, "y": 0 }
+  }
+}

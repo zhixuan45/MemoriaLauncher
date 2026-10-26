@@ -4,7 +4,7 @@ use crate::motion::{self, Toggle};
 use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text_input, Space};
-use iced::{Alignment, Color, Fill, Length};
+use iced::{Alignment, Color, Fill};
 use std::time::Instant;
 
 pub const LOGIN_TAB: usize = 7;
@@ -173,57 +173,44 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
             true,
         )
     } else if state.tab == 0 {
-        let top_height = if app.viewport.height < 740. {
-            278.
-        } else {
-            292.
-        };
-        column![
-            row![
-                panel(
-                    Icon::Play,
-                    GREEN,
-                    "启动器行为",
-                    behavior(state, app.animation_time),
-                    cards
-                ),
-                panel(
-                    Icon::Info,
-                    Color::from_rgb(0.2, 0.75, 1.),
-                    "语言与地区",
-                    locale(state),
-                    cards
-                ),
-                panel(
-                    Icon::Gamepad,
-                    Color::from_rgb(0.2, 0.75, 1.),
-                    "账户与数据",
-                    account(app),
-                    cards
-                ),
-            ]
-            .spacing(12)
-            .height(top_height),
-            row![
-                panel(
-                    Icon::Download,
-                    Color::from_rgb(0.2, 0.75, 1.),
-                    "启动器更新",
-                    updates(state, app.animation_time),
-                    cards
-                ),
-                panel(
-                    Icon::Spark,
-                    Color::from_rgb(1., 0.8, 0.2),
+        scrollable(
+            column![
+                row![
+                    panel(
+                        Icon::Play,
+                        GREEN,
+                        "启动器行为",
+                        behavior(state, app.animation_time),
+                        cards
+                    ),
+                    panel(Icon::Info, MUTED, "语言与地区", locale(state), cards)
+                ]
+                .spacing(16)
+                .height(270),
+                row![
+                    panel(Icon::Gamepad, GREEN, "账户与数据", account(app), cards),
+                    panel(
+                        Icon::Download,
+                        MUTED,
+                        "启动器更新",
+                        updates(state, app.animation_time),
+                        cards
+                    )
+                ]
+                .spacing(16)
+                .height(260),
+                container(panel(
+                    Icon::Sliders,
+                    MUTED,
                     "快捷操作",
                     quick_actions(),
                     cards
-                ),
+                ))
+                .height(185),
             ]
-            .spacing(12)
-            .height(Length::Fill),
-        ]
-        .spacing(12)
+            .spacing(16),
+        )
+        .direction(theme::scroll_direction())
         .height(Fill)
         .into()
     } else if state.tab == LOGIN_TAB {
@@ -272,11 +259,12 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
     container(
         column![
             row![
-                bold("设置", 30.),
+                bold("设置", 26.),
                 label("自定义你的 Minecraft 启动器", 12.).color(MUTED),
                 Space::new().width(Fill),
                 text_input("搜索设置项…", &state.query)
                     .on_input(|q| dispatch(Message::Search(q)))
+                    .style(theme::input)
                     .padding(10)
                     .size(12)
                     .width(220)

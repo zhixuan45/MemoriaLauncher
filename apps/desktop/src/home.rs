@@ -37,9 +37,10 @@ pub fn bounds(card: Card, size: Size) -> Rect {
 }
 
 pub fn view(app: &Launcher, cards: f32) -> Element<'_, Message> {
+    if !app.edit_layout { return crate::dashboard::view(app, cards); }
     let size = Size::new(
-        (app.viewport.width - 194.).max(1.),
-        (app.viewport.height - 40.).max(1.),
+        (app.viewport.width - crate::sidebar::width(app.viewport.width)).max(1.),
+        (app.viewport.height - 116.).max(1.),
     );
     let mut layers = vec![Space::new().width(Fill).height(Fill).into()];
     for card in Card::ALL {

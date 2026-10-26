@@ -752,6 +752,7 @@ mod tests {
 
     // 辅助工具：模拟 OAuth 认证服务器
     async fn spawn_mock_server(status: u16, body: &'static str) -> (String, tokio::task::JoinHandle<()>) {
+        crate::initialize_runtime();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("http://{}", addr);

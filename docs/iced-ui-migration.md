@@ -4,17 +4,17 @@ Based on upstream `9cd898865c32e636801fe888b6ccde8ae394eb22` and the four suppli
 
 ## Implemented
 
-- Four persistent page states behind the fixed sidebar. Navigating clears modal/drag/layout-edit state without discarding the download filters, selected version or AI input.
+- The shell now uses the dark project workspace design; Home, chat, downloads and settings remain reachable through the persistent sidebar. Navigating clears modal/drag/layout-edit state without discarding the download filters, selected version or AI input.
 - Downloads: five resource categories, search, release/snapshot and loader filters, date ordering, selection, four detail tabs, banner controls and loading/error/empty states. Catalogue loading uses the existing asynchronous `CatalogProvider` contract, once on first entry (or explicitly on refresh).
-- AI: one prompt field, target version/language, web-search option, two batches of eight suggestions, four examples, translation entry points and an independently scrollable task panel. Small windows use two-column cards and wrap the composer controls.
+- AI: a minimal opening composer, project conversations, session-only history, clear, failure retry and opt-in file/log context. The former suggestions, examples, selectors, unsupported search controls and task panel were removed. Provider configuration stays in Settings.
 - Settings: seven navigable tabs, five general-settings cards, keyword search and an explicit explanation for categories whose configuration service is not connected.
-- Retained the existing home layout editor, instance selection/reordering, featured cards, queue controls and account preview.
+- The default homepage is now a project dashboard with instance statistics, launch and conversation entries. The previous home canvas, selection/reordering and auxiliary cards remain available through the layout editor. Account and queue services are reused.
 
 ## Shared motion
 
 `motion::fade` and `motion::pop` wrap existing widgets without changing their layout. The renderer applies opacity to panels, borders, shadows, text, images and SVGs on both existing backends. Pages crossfade over 180 ms. Each destination card independently pops from 94% to 100% scale, moving upward 12 px and fading in over 50 ms, starting together on navigation. The outgoing page's cards stay settled. Dialogs use the same pop over 220 ms and fade out over 150 ms. All use cubic ease-out.
 
-`motion::Toggle` slides the round thumb between left/right positions and interpolates track/thumb colors over 120 ms in settings and AI search, retaining native toggler input. The value changes immediately, and rapid clicks reverse from the current position and color. Restoring default settings also animates affected switches. Labels remain at full opacity; switches share the application's animation timer, which stops when all transitions settle.
+`motion::Toggle` slides the round thumb between left/right positions and interpolates track/thumb colors over 120 ms in settings, retaining native toggler input. The value changes immediately, and rapid clicks reverse from the current position and color. Restoring default settings also animates affected switches. Labels remain at full opacity; switches share the application's animation timer, which stops when all transitions settle.
 
 Animation ticks are subscribed only while a transition is active. Repeated dismissal does not restart the exit, and reopening the same dialog reverses from its current progress. The dialog and its input barrier remain until the exit completes. Widget hit-testing follows the pop transform, while the stable shell tree retains focus and scroll state across dialog transitions.
 
@@ -43,7 +43,7 @@ The previous application subscribed to every runtime input event, including ordi
 
 The desktop now scans local instances, persists Microsoft accounts using the Windows credential vault, launches through the existing core runtime, and reads Mojang's official version manifest. See [Desktop data sources](real-data-integration.md) for configuration and validation boundaries. Sample providers remain available as test fixtures.
 
-Mod/resource/shader catalogues, third-party loader installation, attachment import, and AI execution remain unavailable. Their actions explain the missing service and never fabricate successful work. Vanilla installation now downloads verified files through the configured source and concurrency limit. Game/download/account configuration is persistent; other general switches retain their session-only behavior.
+Modrinth mod/modpack/resource-pack/shader catalogues now support search, version/loader filters, pagination and version-file/dependency inspection. Image/text/PDF attachments are supported; third-party installation and AI tool execution remain unavailable. Their actions explain the missing service and never fabricate successful work. Vanilla installation now downloads verified files through the configured source and concurrency limit. Game/download/AI/account configuration is persistent; other general switches retain their session-only behavior.
 
 ## Verification
 
@@ -67,3 +67,5 @@ ICED_TEST_BACKEND=tiny-skia MEMORIA_UI_CAPTURE_DIR=/tmp/memoria-ui \
 Local verification: desktop tests and the mc-core unit/contract tests pass; eight headless screenshots cover all four pages at both sizes. Headless rendering is not a native Windows GPU benchmark, and no FPS/CPU reduction percentage is asserted.
 
 A broader `cargo test --workspace` additionally exercises the unchanged vendored `mc-launcher-core`. Five vendor tests fail here: two network/debug tests panic because reqwest's `rustls-no-provider` has no installed crypto provider, then three tests fail through a poisoned shared cache mutex. The project-owned tests pass; the vendor runtime problem is recorded separately instead of reporting the whole workspace green.
+
+The current workspace layout, per-instance launch buttons, attachment limits and enforced MCP permissions are documented in [Workspace UI](workspace-ui.md).

@@ -760,14 +760,25 @@ mod tests {
         assert!(state.copied_feedback.is_none());
     }
 
-    #[test]
-    fn adding_offline_account_updates_index_and_description() {
-        let mut state = State::default();
-        state.busy = false;
+    #[tokio::test]
+    async fn adding_offline_account_updates_index_and_description() {
+        use iced::futures::StreamExt;
+        let directory = std::env::temp_dir().join(format!("memoria-account-{}", uuid::Uuid::new_v4()));
+        let mut state = State::from_directory(directory.clone());
+        let _ = state.update(Message::Loaded(Ok(AccountIndex::default())));
         state.offline_input = "Alex".into();
-        let _ = state.update(Message::AddOffline);
+        let task = state.update(Message::AddOffline);
+        let mut stream = iced_test::runtime::task::into_stream(task).unwrap();
+        while let Some(action) = stream.next().await {
+            if let iced_test::runtime::Action::Output(message) = action {
+                let _ = state.update(message);
+            }
+        }
         assert_eq!(state.name(), "Alex");
         assert!(state.description().contains("离线"));
         assert!(state.index.current().unwrap().is_offline());
+        let saved = read_index(directory.join("accounts.json")).await.unwrap();
+        assert_eq!(saved.current().unwrap().username, "Alex");
+        tokio::fs::remove_dir_all(directory).await.unwrap();
     }
 }

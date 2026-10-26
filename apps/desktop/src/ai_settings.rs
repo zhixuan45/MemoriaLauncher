@@ -53,6 +53,21 @@ pub struct Connection {
     pub error: Option<String>,
 }
 impl Connection {
+    pub async fn conversation(
+        &self,
+        messages: Vec<crate::api_client::ChatMessage>,
+        attachments: Vec<crate::attachments::Attachment>,
+    ) -> Result<String, String> {
+        self.validate()?;
+        crate::api_client::conversation_with_attachments(
+            self.config.endpoint.clone(),
+            self.config.model.clone(),
+            self.key.expose().to_owned(),
+            messages,
+            attachments,
+        )
+        .await
+    }
     pub fn validate(&self) -> Result<(), String> {
         if let Some(error) = &self.error {
             return Err(error.clone());
@@ -155,6 +170,7 @@ async fn save_config(
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    McpTab(bool),
     Endpoint(String),
     Model(String),
     Key(Secret),
@@ -164,6 +180,7 @@ pub enum Message {
     Checked(Result<String, String>),
 }
 pub struct State {
+    pub mcp_tab: bool,
     pub saved: Connection,
     pub endpoint: String,
     pub model: String,
@@ -175,6 +192,7 @@ pub struct State {
 impl State {
     pub fn new(connection: Connection) -> Self {
         Self {
+            mcp_tab: false,
             endpoint: connection.config.endpoint.clone(),
             model: connection.config.model.clone(),
             key: connection.key.clone(),
@@ -210,6 +228,7 @@ impl State {
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::McpTab(value) => self.mcp_tab = value,
             Message::Saved(result) => {
                 self.busy = false;
                 match result {
@@ -288,6 +307,30 @@ fn dispatch(message: Message) -> AppMessage {
     AppMessage::AiSettings(message)
 }
 pub fn view(app: &Launcher) -> Element<'_, AppMessage> {
+    let mcp = app.ai_settings.mcp_tab;
+    column![
+        row![
+            button(label("模型连接", 12.))
+                .padding(10)
+                .style(if mcp { theme::quiet } else { theme::selected })
+                .on_press(dispatch(Message::McpTab(false))),
+            button(label("MCP 服务器", 12.))
+                .padding(10)
+                .style(if mcp { theme::selected } else { theme::quiet })
+                .on_press(dispatch(Message::McpTab(true))),
+        ]
+        .spacing(8),
+        if mcp {
+            crate::mcp_settings::view(app)
+        } else {
+            connection_view(app)
+        }
+    ]
+    .spacing(12)
+    .height(Fill)
+    .into()
+}
+fn connection_view(app: &Launcher) -> Element<'_, AppMessage> {
     let state = &app.ai_settings;
     let enabled = !state.busy;
     let content = column![
@@ -589,6 +632,6 @@ mod tests {
         .await
         .unwrap();
         assert!(!app.ai.busy);
-        assert_eq!(app.ai.reply.as_deref(), Some("fixture-reply"));
+        assert_eq!(app.ai.messages.last().unwrap().content, "fixture-reply");
     }
 }

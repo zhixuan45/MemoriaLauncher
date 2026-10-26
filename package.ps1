@@ -29,8 +29,8 @@ if (-not $env:CARGO_TARGET_DIR) {
 }
 Write-Host "构建输出目录: $env:CARGO_TARGET_DIR" -ForegroundColor DarkGray
 
-Write-Host "==> 开始编译 Release 单文件可执行文件 (apps/desktop)..." -ForegroundColor Cyan
-& cargo build --release --locked -p desktop
+Write-Host "==> 开始编译 Release 启动器与内置 MCP 服务..." -ForegroundColor Cyan
+& cargo build --release --locked -p desktop -p mc-mcp
 if ($LASTEXITCODE -ne 0) {
     Write-Error "编译失败，退出码: $LASTEXITCODE"
     exit $LASTEXITCODE
@@ -46,6 +46,9 @@ $SourceExe = Join-Path $env:CARGO_TARGET_DIR "release\desktop.exe"
 $DestExe = Join-Path $DistDir "MemoriaLauncher.exe"
 
 Copy-Item -Path $SourceExe -Destination $DestExe -Force
+$McpSourceExe = Join-Path $env:CARGO_TARGET_DIR "release\mc-mcp.exe"
+$McpDestExe = Join-Path $DistDir "mc-mcp.exe"
+Copy-Item -Path $McpSourceExe -Destination $McpDestExe -Force
 
 $FileInfo = Get-Item $DestExe
 $FileHash = (Get-FileHash -Path $DestExe -Algorithm SHA256).Hash
@@ -55,3 +58,4 @@ Write-Host "`n打包完成！" -ForegroundColor Green
 Write-Host "输出文件: $DestExe"
 Write-Host "文件大小: $SizeMB MB ($($FileInfo.Length) 字节)"
 Write-Host "SHA256:   $FileHash"
+Write-Host "MCP 服务: $McpDestExe"
