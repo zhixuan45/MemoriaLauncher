@@ -27,7 +27,7 @@ Windows 系统颜色通过 [DwmGetColorizationColor](https://learn.microsoft.com
 
 Mod、资源包、光影分别部署到实例内的 `mods/`、`resourcepacks/`、`shaderpacks/`。必需依赖按兼容版本递归解析，可选依赖提示后由用户另选；已知来源记录用于检查版本冲突与更新旧文件。未知来源的本地 Mod 不具备完整的跨平台兼容性求解。
 
-整合包按 [Modrinth mrpack 格式](https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack) 解析，读取清单下载文件并校验哈希，跳过仅服务端文件，可选客户端文件由复选框控制；`client-overrides` 在共享 `overrides` 之后应用。目标实例必须已安装清单要求的 Minecraft 与相同版本加载器。建议准备独立目标实例；此流程不自动运行 Forge/NeoForge 等加载器安装器。
+整合包按 [Modrinth mrpack 格式](https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack) 解析，读取清单下载文件并校验哈希，跳过仅服务端文件，可选客户端文件由复选框控制；`client-overrides` 在共享 `overrides` 之后应用。目标实例必须已安装清单要求的 Minecraft 与相同版本加载器。建议准备独立目标实例；此资源部署流程不自动运行加载器安装器；可先通过专用的[加载器安装入口](loaders-and-diagnostics.md)创建匹配的独立实例。
 
 远程单文件最多 64 MiB、单次计划合计最多 1 GiB；Mod JAR 同时受结构检查的 32 MiB 上限限制。整合包覆盖文件仅允许游戏内容目录（如 `config/`、`mods/`、`resourcepacks/`、`kubejs/` 等），拒绝目录穿越、链接和启动器元数据路径。
 

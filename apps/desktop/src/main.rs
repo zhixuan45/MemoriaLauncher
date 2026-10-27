@@ -27,6 +27,8 @@ mod home;
 mod interaction_tests;
 mod java_environment;
 mod local;
+mod loader_install;
+mod diagnostics;
 mod mcp_settings;
 mod models;
 mod motion;

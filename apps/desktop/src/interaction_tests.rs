@@ -840,3 +840,6 @@ mod instance_features;
 
 #[path = "general_ui_tests.rs"]
 mod general_settings;
+
+#[path = "loader_diagnostics_ui_tests.rs"]
+mod loader_diagnostics;

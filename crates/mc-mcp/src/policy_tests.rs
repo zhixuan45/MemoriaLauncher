@@ -35,7 +35,7 @@ async fn permissions_filter_tool_discovery_and_deny_ungranted_tools_and_instance
     )
     .await
     .unwrap();
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 5);
     for name in ["minecraft_list_versions", "run_shell"] {
         let denied = dispatch_with_policy(
             json!({"jsonrpc":"2.0", "id":2,"method":"tools/call", "params":{"name":name}}),
@@ -68,6 +68,13 @@ async fn permissions_filter_tool_discovery_and_deny_ungranted_tools_and_instance
         read["result"]["structuredContent"]["log"]["text"],
         "allowed log"
     );
+    let analyzed=dispatch_with_policy(json!({"jsonrpc":"2.0","id":51,"method":"tools/call","params":{"name":"minecraft_analyze_logs","arguments":{"instance_id":"versions/allowed","path":"logs/latest.log"}}}),&catalog,Path::new("ignored"),Some(&policy)).await.unwrap();
+    assert_eq!(analyzed["result"]["structuredContent"]["analysis"]["findings"][0]["category"],"unknown");
+    for (enabled,id) in [(true,"versions/denied"),(false,"versions/allowed")] {
+        policy.permissions.logs=enabled;
+        let analyzed=dispatch_with_policy(json!({"jsonrpc":"2.0","id":52,"method":"tools/call","params":{"name":"minecraft_analyze_logs","arguments":{"instance_id":id,"path":"logs/latest.log"}}}),&catalog,Path::new("ignored"),Some(&policy)).await.unwrap();
+        assert_eq!(analyzed["result"]["structuredContent"]["code"],"PERMISSION_DENIED");
+    }
     policy.enabled = false;
     let disabled = dispatch_with_policy(
         json!({"jsonrpc":"2.0", "id":6,"method":"tools/list"}),

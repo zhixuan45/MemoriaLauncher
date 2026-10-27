@@ -90,6 +90,10 @@ pub enum Message {
     InstanceSettings(crate::instance_settings::Message),
     Appearance(crate::appearance::Message),
     ResourceInstall(crate::resource_install::Message),
+    OpenLoader,
+    LoaderInstall(crate::loader_install::Message),
+    OpenDiagnostics,
+    Diagnostics(crate::diagnostics::Message),
     GameStarted(String),
     GameFinished(Result<crate::local::GameExit, String>),
     AnalyzeCrash,
@@ -164,6 +168,8 @@ pub struct Launcher {
     pub instance_settings: crate::instance_settings::State,
     pub appearance: crate::appearance::State,
     pub resource_install: crate::resource_install::State,
+    pub loader_install: crate::loader_install::State,
+    pub diagnostics: crate::diagnostics::State,
     pub verification: verification::Verification,
 }
 
@@ -175,6 +181,8 @@ pub enum Modal {
     Profile,
     Crash,
     ResourceInstall,
+    LoaderInstall,
+    Diagnostics,
 }
 
 impl Launcher {
@@ -226,6 +234,8 @@ impl Launcher {
             instance_settings: Default::default(),
             appearance: crate::appearance::State::load(),
             resource_install: Default::default(),
+            loader_install: Default::default(),
+            diagnostics: Default::default(),
             verification: verification::Verification::from_args(),
         };
         let task = Task::batch([state.load(), state.accounts.load().map(Message::Accounts)]);
@@ -244,21 +254,66 @@ impl Launcher {
     }
     pub fn theme(&self) -> iced::Theme { self.appearance.theme() }
     pub fn scale_factor(&self) -> f32 { self.appearance.saved.scale as f32 / 100. }
-    pub fn instance_writing(&self) -> bool { self.instance_settings.busy || self.resource_install.busy }
+    pub fn instance_writing(&self) -> bool {
+        self.instance_settings.busy || self.resource_install.busy || self.loader_install.installing
+    }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::OpenLoader => {
+                if self.instance_writing()
+                    || self.launching
+                    || self.loading
+                    || self.environment_saving
+                    || self.download.installing.is_some()
+                {
+                    return Task::none();
+                }
+                self.loader_install.open(
+                    self.environment.game_root.clone(),
+                    &self.instances,
+                    &self.active,
+                    self.environment.java.clone(),
+                );
+                self.open_modal(Modal::LoaderInstall);
+            }
+            Message::LoaderInstall(message) => {
+                let refresh = matches!(&message, crate::loader_install::Message::Finished(g, Ok(_)) if *g == self.loader_install.generation);
+                let blocked = self.launching
+                    || self.loading
+                    || self.environment_saving
+                    || self.download.installing.is_some()
+                    || self.instance_settings.busy
+                    || self.resource_install.busy
+                    || !crate::local::same_root(&self.loader_install.root, &self.environment.game_root);
+                let task = self.loader_install
+                    .update(message, self.download.client.clone(), blocked)
+                    .map(Message::LoaderInstall);
+                self.status = self.loader_install.notice.clone();
+                if refresh && crate::local::same_root(&self.loader_install.root, &self.environment.game_root) {
+                    return Task::batch([task, self.load()]);
+                }
+                return task;
+            }
+            Message::OpenDiagnostics => {
+                self.open_modal(Modal::Diagnostics);
+                let instance = self.current().map(|entry| entry.instance.id.clone()).unwrap_or_default();
+                return self.diagnostics.open(
+                    self.environment.game_root.clone(), instance, None, None,
+                ).map(Message::Diagnostics);
+            }
+            Message::Diagnostics(message) => return self.diagnostics.update(message).map(Message::Diagnostics),
             Message::Appearance(message) => return self.appearance.update(message).map(Message::Appearance),
             Message::InstanceSettings(message) => {
                 let refresh=matches!(&message,crate::instance_settings::Message::Completed(g,Ok(_),notice) if *g==self.instance_settings.generation && notice!="实例已读取");
-                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.resource_install.busy;
+                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.resource_install.busy||self.loader_install.installing;
                 let task=if let Some(task)=self.instance_settings.picker(&message){task}else{self.instance_settings.update(message,blocked)}.map(Message::InstanceSettings);
                 if refresh && crate::local::same_root(&self.instance_settings.root,&self.environment.game_root){return Task::batch([task,self.load()]);}
                 return task;
             }
             Message::ResourceInstall(message) => {
                 let refresh=matches!(&message,crate::resource_install::Message::Finished(g,Ok(_)) if *g==self.resource_install.generation);
-                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||!crate::local::same_root(&self.resource_install.root,&self.environment.game_root);
+                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||self.loader_install.installing||!crate::local::same_root(&self.resource_install.root,&self.environment.game_root);
                 let task=self.resource_install.update(message,self.download.client.clone(),blocked).map(Message::ResourceInstall);
                 self.status=self.resource_install.notice.clone();
                 if refresh && crate::local::same_root(&self.resource_install.root,&self.environment.game_root){return Task::batch([task,self.load()]);}
@@ -419,10 +474,16 @@ impl Launcher {
                 match result {
                     Ok(finished) => {
                         self.status = finished.description();
+                        let path = finished.exit.log_path.file_name()
+                            .map(|name| format!(".launcher/logs/{}", name.to_string_lossy()));
+                        let diagnostics = self.diagnostics.open(
+                            finished.game_root.clone(), finished.instance_id.clone(), path, finished.exit.code,
+                        ).map(Message::Diagnostics);
                         if !finished.exit.success {
                             self.crash = Some(finished);
                             self.open_modal(Modal::Crash);
                         }
+                        return diagnostics;
                     }
                     Err(error) => self.status = format!("游戏启动或退出监测失败：{error}"),
                 }

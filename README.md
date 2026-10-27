@@ -24,6 +24,8 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | 异常退出检测 | 非正常退出时提示启用 AI 分析；用户确认发送后才上传本次启动日志末尾，可移除附件 |
 | 官方版本目录 | 从 Mojang 官方版本清单读取真实版本、发布时间与元数据地址 |
 | 下载安装 | 下载原版客户端、依赖库、原生库与资源，校验 SHA-1，安装后自动扫描到当前实例集 |
+| 加载器安装 | Fabric/Quilt 官方 profile；现代 Forge/NeoForge 官方安装器；版本查询、预览确认及新建独立实例 |
+| 本地日志诊断 | 游戏退出后自动解析本次日志；实例日志浏览和文本导入，提供分类、证据与建议，不自动上传或修改文件 |
 | 下载设置 | 官方、BMCLAPI 或自定义兼容镜像；支持 1–64 个并行下载，保存后新任务生效，重启保留 |
 | 常规与维护 | 窗口行为和日期格式持久化、常规配置导入导出、数据目录、可恢复缓存移动、项目发布版本检查；详见[说明](docs/general-settings.md) |
 | 本地统计 | 统计实例隔离目录内的 Mod JAR 数量；尚未记录的游玩时长显示“未记录” |
@@ -33,7 +35,7 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | AI 对话 | 条形输入框、多对话切换、连续追问；加号添加实例日志上下文、图片、文本/配置及 PDF |
 | MCP 服务 | AI 设置中配置内置 stdio 服务，选择读取/写入权限和授权实例；服务端执行并动态重读权限 |
 
-**尚未完成：** 第三方加载器自动安装、通用依赖兼容性求解、AI 自动组包与汉化、跨文件崩溃自动恢复、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。实例管理、外观及资源安装用法见[功能说明](docs/instance-management.md)。
+**尚未完成：** 通用依赖兼容性求解、AI 自动组包与汉化、跨文件崩溃自动恢复、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。实例管理、外观及资源安装用法见[功能说明](docs/instance-management.md)。加载器支持范围与日志诊断见[说明](docs/loaders-and-diagnostics.md)。
 
 ## 本地运行
 
@@ -102,7 +104,7 @@ cargo build --locked -p mc-mcp
 .\target\debug\mc-mcp.exe --game-root=C:\Games\.minecraft
 ```
 
-默认提供 `minecraft_list_versions`、`minecraft_list_instances`、`minecraft_search_mods`、`minecraft_get_mod_info`、`minecraft_list_instance_logs`、`minecraft_read_instance_log` 六个只读工具。保存授权后可使用来源 ID / JAR 安装、配置写入、FTB 语义化任务和图片写入；先预览再按哈希应用。任务图标、条件和奖励均校验实际物品注册表。客户端配置见 [MCP 文档](docs/mcp.md)，写入格式与限制见 [实例写入](docs/mcp-writes.md)。
+默认提供 `minecraft_list_versions`、`minecraft_list_instances`、`minecraft_search_mods`、`minecraft_get_mod_info`、`minecraft_list_instance_logs`、`minecraft_read_instance_log`、`minecraft_analyze_logs` 七个只读工具。保存授权后可使用来源 ID / JAR 安装、配置写入、FTB 语义化任务和图片写入；先预览再按哈希应用。任务图标、条件和奖励均校验实际物品注册表。客户端配置见 [MCP 文档](docs/mcp.md)，写入格式与限制见 [实例写入](docs/mcp-writes.md)。
 
 ## 配置与凭据
 

@@ -78,6 +78,8 @@ async fn running_server_reloads_saved_permissions_and_never_falls_back_from_a_br
         "PERMISSION_DENIED"
     );
     assert!(!denied.to_string().contains("two private log"));
+    let analysis=request(&mut input,&mut output,json!({"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"minecraft_analyze_logs","arguments":{"instance_id":"versions/one","path":"logs/latest.log"}}})).await;
+    assert_eq!(analysis["result"]["structuredContent"]["analysis"]["findings"][0]["category"],"unknown");
     policy.permissions.logs = false;
     policy.save(&path).await.unwrap();
     let revoked = request(&mut input, &mut output, json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"minecraft_read_instance_log","arguments":{"instance_id":"versions/one","path":"logs/latest.log"}}})).await;
@@ -85,6 +87,8 @@ async fn running_server_reloads_saved_permissions_and_never_falls_back_from_a_br
         revoked["result"]["structuredContent"]["code"],
         "PERMISSION_DENIED"
     );
+    let analysis=request(&mut input,&mut output,json!({"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"minecraft_analyze_logs","arguments":{"instance_id":"versions/one","path":"logs/latest.log"}}})).await;
+    assert_eq!(analysis["result"]["structuredContent"]["code"],"PERMISSION_DENIED");
     policy.enabled = false;
     policy.save(&path).await.unwrap();
     let disabled = request(

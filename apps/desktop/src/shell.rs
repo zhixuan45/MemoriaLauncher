@@ -95,6 +95,11 @@ fn workspace_toolbar(app: &Launcher) -> Element<'_, Message> {
             .on_press_maybe((!app.ai.busy && !app.ai.loading_log && !app.ai.attachments.loading()).then_some(Message::Ai(crate::ai::Message::Clear))))
             .push(button(label("AI 设置", 11.)).padding(8).style(theme::quiet).on_press(Message::Ai(crate::ai::Message::OpenSettings)));
     }
+    controls=controls.push(button(label("日志诊断",11.)).padding(8).style(theme::quiet).on_press(Message::OpenDiagnostics));
+    if matches!(app.page,Page::Home|Page::Download) {
+        controls=controls.push(button(label("安装加载器",11.)).padding(8).style(theme::quiet)
+            .on_press_maybe((!app.instance_writing()&&!app.launching).then_some(Message::OpenLoader)));
+    }
     let target = if app.page == Page::Ai {
         app.workspace.current.project.as_ref().filter(|p| p.matches(&app.environment.game_root, &app.active))
             .and_then(|p| app.instances.iter().find(|i| i.instance.id == p.instance_id))
@@ -119,6 +124,8 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 Modal::Profile => "账户管理",
                 Modal::Crash => "实例异常退出",
                 Modal::ResourceInstall => "安装第三方资源",
+                Modal::LoaderInstall => "安装加载器",
+                Modal::Diagnostics => "本地日志诊断",
             },
             22.
         ),
@@ -130,6 +137,12 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
     match modal {
         Modal::Crash => {
             if let Some(crash) = &app.crash {
+                if app.diagnostics.instance==crash.instance_id && crate::local::same_root(&app.diagnostics.root,&crash.game_root)
+                    && crash.exit.log_path.file_name().is_some_and(|name|app.diagnostics.selected==format!(".launcher/logs/{}",name.to_string_lossy())) {
+                    if let Some(analysis)=&app.diagnostics.analysis {
+                        content=content.push(scrollable(crate::diagnostics::summary(analysis)).direction(theme::scroll_direction()).height(120));
+                    }
+                }
                 content = content
                     .push(label(crash.description(), 13.))
                     .push(label("可以启用 AI 分析，帮助定位 Mod 冲突、Java 错误等可能原因。", 13.))
@@ -150,6 +163,10 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
         Modal::Instance => {
             content=content.push(crate::instance_settings::view(&app.instance_settings,app.launching||app.resource_install.busy||app.download.installing.is_some()));
         }
+        Modal::LoaderInstall => {
+            content=content.push(crate::loader_install::view(&app.loader_install,app.launching||app.resource_install.busy||app.instance_settings.busy||app.download.installing.is_some()));
+        }
+        Modal::Diagnostics => content=content.push(crate::diagnostics::view(&app.diagnostics)),
         Modal::ResourceInstall => {
             content=content.push(crate::resource_install::view(&app.resource_install,app.launching||app.instance_settings.busy||app.download.installing.is_some()||!crate::local::same_root(&app.resource_install.root,&app.environment.game_root)));
         }
@@ -498,7 +515,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
     }
     let dialog = container(scrollable(content).direction(theme::scroll_direction()))
         .padding(24)
-        .width(if matches!(modal,Modal::Instance|Modal::ResourceInstall){760}else{580})
+        .width(if matches!(modal,Modal::Instance|Modal::ResourceInstall|Modal::LoaderInstall|Modal::Diagnostics){760}else{580})
         .max_height((app.viewport.height-60.).min(640.))
         .style(theme::panel);
     let progress = app.modal_motion.value(app.animation_time);

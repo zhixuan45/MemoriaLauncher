@@ -25,6 +25,7 @@ Windows 可设置 MEMORIA_GAME_ROOT 为 Minecraft 的根目录；未设置时尝
 | minecraft_get_mod_info | Modrinth V2 /project | 项目描述、许可、版本 ID |
 | minecraft_list_instance_logs | 指定实例的日志目录 | 列出最近最多 100 个日志，包含相对路径、类型、大小、修改时间 |
 | minecraft_read_instance_log | 指定实例的日志文件 | 读取日志末尾，默认 32 KiB、最大 64 KiB；遮蔽常见凭据行 |
+| minecraft_analyze_logs | 指定实例的日志文件 | 本地解析末尾 64 KiB，返回异常分类、遮蔽证据、置信度及排查建议，不执行修复 |
 
 示例工具入参：`{"query":"sodium","minecraft_version":"1.21","loader":"fabric","limit":5}`。
 
@@ -77,3 +78,5 @@ cargo test -p mc-core -p mc-mcp -p desktop
 在 **设置 → AI 设置 → MCP 服务器** 中启用服务，分别选择目录查询、实例信息、日志以及四类写入权限，再勾选实例并点击 **保存 MCP 权限**。授权绑定当前选择的实例集路径；切换授权实例集会清空原实例选择。配置写入启动器数据目录的 `mcp.json`，服务端每次请求重读配置。未获授权的工具或实例返回 `PERMISSION_DENIED`，关闭后工具列表为空，损坏配置拒绝请求而不回退。未创建该文件时，CLI 保持原有只读行为。
 
 点击 **复制客户端连接配置** 可生成启动器同目录 `mc-mcp` 的 stdio 配置，并设置相同 `MEMORIA_DATA_DIR`。Windows 打包脚本会同时分发两个程序。权限仅限制此内置服务器提供的工具；写入格式、注册表导入和恢复边界见 [实例写入](mcp-writes.md)。不提供游戏启动工具。附件、持续日志上下文和界面行为见 [工作区界面](workspace-ui.md)。
+
+本地规则诊断及加载器安装的完整说明与验证边界见[加载器与诊断](loaders-and-diagnostics.md)。分析工具沿用日志权限和实例白名单，输出属于不可信日志的派生数据。

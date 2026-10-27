@@ -48,14 +48,14 @@ fn log_path(layout: &GameLayout, instance: &str, path: &str) -> LauncherResult<P
     if log_kind(path).is_none() || path.contains('\\') {
         return Err(LauncherError::UnsafePath(path.into()));
     }
-    let directory = layout.version_dir(instance)?;
+    let directory = instance_directory(layout, instance)?;
     let result = checked_join(&directory, Path::new(path))?;
     // A log name must not alias another file inside the instance, either.
     let mut component = directory;
     for part in path.split('/') {
         component.push(part);
         match fs::symlink_metadata(&component) {
-            Ok(meta) if meta.file_type().is_symlink() => {
+            Ok(meta) if is_link(&meta) => {
                 return Err(LauncherError::UnsafePath(path.into()));
             }
             Ok(_) => {}
@@ -66,12 +66,37 @@ fn log_path(layout: &GameLayout, instance: &str, path: &str) -> LauncherResult<P
     Ok(result)
 }
 
+fn is_link(meta: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return true;
+        }
+    }
+    meta.file_type().is_symlink()
+}
+fn instance_directory(layout: &GameLayout, instance: &str) -> LauncherResult<PathBuf> {
+    let directory = layout.version_dir(instance)?;
+    let mut path = layout.root().to_path_buf();
+    for part in instance.split('/') {
+        path.push(part);
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if is_link(&meta) => return Err(LauncherError::UnsafePath(instance.into())),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(directory)
+}
+
 pub async fn list_instance_logs(
     layout: GameLayout,
     instance: String,
 ) -> LauncherResult<Vec<InstanceLog>> {
     tokio::task::spawn_blocking(move || {
-        let directory = layout.version_dir(&instance)?;
+        let directory = instance_directory(&layout, &instance)?;
         let mut logs = Vec::new();
         for folder in [".launcher/logs", "logs", "crash-reports", ""] {
             let location = if folder.is_empty() {
@@ -125,7 +150,7 @@ pub async fn list_instance_logs(
     .map_err(|error| LauncherError::Internal(error.to_string()))?
 }
 
-fn redact(text: &str) -> (String, usize) {
+pub(crate) fn redact(text: &str) -> (String, usize) {
     static CREDENTIAL: OnceLock<Regex> = OnceLock::new();
     let pattern = CREDENTIAL.get_or_init(|| Regex::new(
         r"(?i)(access[_-]?token|refresh[_-]?token|client[_-]?token|client[_-]?secret|api[_-]?key|authorization\s*[:=]|bearer\s+|xbl3\.0\s+x=|--session\b|password\s*[:=])"

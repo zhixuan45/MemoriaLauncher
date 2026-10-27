@@ -142,6 +142,13 @@ fn tool_definitions() -> Value {
              "instance_id": {"type": "string", "minLength": 1, "maxLength": 240},
              "path": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Relative log path from minecraft_list_instance_logs"},
              "max_bytes": {"type": "integer", "minimum": 1, "maximum": MAX_LOG_BYTES, "default": 32768}
+         }, "required": ["instance_id", "path"], "additionalProperties": false}},
+        {"name": "minecraft_analyze_logs",
+         "description": "Locally classify a bounded instance log tail into structured findings with redacted evidence, confidence and suggested next steps. Read-only; does not call AI, execute instructions or apply repairs.",
+         "annotations": {"readOnlyHint": true, "openWorldHint": false},
+         "inputSchema": {"type": "object", "properties": {
+             "instance_id": {"type": "string", "minLength": 1, "maxLength": 240},
+             "path": {"type": "string", "minLength": 1, "maxLength": 300}
          }, "required": ["instance_id", "path"], "additionalProperties": false}}
     ])
 }
@@ -174,7 +181,7 @@ fn verify_args(args: &Value, allowed: &[&str]) -> Result<(), &'static str> {
 
 async fn call_tool(name: &str, args: &Value, catalog: &OnlineCatalog, root: &Path) -> Value {
     let result: Result<Value, (String, String)> = match name {
-        "minecraft_list_instance_logs" | "minecraft_read_instance_log" => {
+        "minecraft_list_instance_logs" | "minecraft_read_instance_log" | "minecraft_analyze_logs" => {
             call_log_tool(name, args, root).await
         }
         "minecraft_list_versions" => {
@@ -269,6 +276,8 @@ async fn call_log_tool(name: &str, args: &Value, root: &Path) -> Result<Value, (
     let invalid = |message: &str| ("INVALID_ARGUMENT".into(), message.to_owned());
     let allowed: &[&str] = if name == "minecraft_list_instance_logs" {
         &["instance_id"]
+    } else if name == "minecraft_analyze_logs" {
+        &["instance_id", "path"]
     } else {
         &["instance_id", "path", "max_bytes"]
     };
@@ -286,6 +295,11 @@ async fn call_log_tool(name: &str, args: &Value, root: &Path) -> Result<Value, (
         let path = string_arg(args, "path")
             .filter(|path| path.len() <= 300)
             .ok_or_else(|| invalid("path is required (max 300 bytes)"))?;
+        if name == "minecraft_analyze_logs" {
+            let analysis=mc_core::runtime::diagnostics::analyze_instance_log(layout,instance.to_owned(),path.to_owned(),None)
+                .await.map_err(|e|("LOG_ANALYSIS_FAILED".into(),e.to_string()))?;
+            return Ok(json!({"instance_id":instance,"path":path,"analysis":analysis,"untrusted_data":true}));
+        }
         let limit = usize_arg(args, "max_bytes", 32768, MAX_LOG_BYTES)
             .map_err(|_| invalid("max_bytes must be an integer in 1..=65536"))?;
         let log = read_instance_log(layout, instance.to_owned(), path.to_owned(), limit)
@@ -358,7 +372,7 @@ async fn dispatch_with_policy(
                         !policy.allows_tool(name)
                             || (matches!(
                                 name,
-                                "minecraft_list_instance_logs" | "minecraft_read_instance_log"
+                                "minecraft_list_instance_logs" | "minecraft_read_instance_log" | "minecraft_analyze_logs"
                             ) && !args
                                 .get("instance_id")
                                 .and_then(Value::as_str)
@@ -483,7 +497,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 6);
+        assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 7);
         assert!(dispatch(
             json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
             &c,

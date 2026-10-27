@@ -70,7 +70,7 @@ impl McpPolicy {
                     self.permissions.catalog
                 }
                 "minecraft_list_instances" => self.permissions.instances,
-                "minecraft_list_instance_logs" | "minecraft_read_instance_log" => {
+                "minecraft_list_instance_logs" | "minecraft_read_instance_log" | "minecraft_analyze_logs" => {
                     self.permissions.logs
                 }
                 "minecraft_get_write_formats" => true,

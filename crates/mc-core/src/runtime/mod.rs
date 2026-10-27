@@ -5,6 +5,8 @@ mod java;
 mod launch;
 mod layout;
 mod logs;
+pub mod diagnostics;
+pub mod loaders;
 mod metadata;
 mod natives;
 mod process;
