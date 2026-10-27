@@ -843,3 +843,6 @@ mod general_settings;
 
 #[path = "loader_diagnostics_ui_tests.rs"]
 mod loader_diagnostics;
+
+#[path="dependency_rules_ui_tests.rs"]
+mod dependency_rules;

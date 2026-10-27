@@ -34,6 +34,10 @@ pub enum Message {
     CancelRemove,
     ConfirmRemove,
     Completed(u64, Result<Snapshot, String>, String),
+    CheckDependencies,
+    ImportCandidates,
+    CandidateFiles(u64, Vec<PathBuf>),
+    DependenciesChecked(u64, Result<mc_core::service::mod_resolver::Report, String>),
 }
 #[derive(Default)]
 pub struct State {
@@ -52,6 +56,7 @@ pub struct State {
     query: String,
     pub notice: String,
     remove: Option<ModEntry>,
+    pub dependency_report: Option<mc_core::service::mod_resolver::Report>,
 }
 impl State {
     pub fn open(&mut self, root: PathBuf, instance: String) -> Task<Message> {
@@ -84,6 +89,7 @@ impl State {
         match message {
             Message::Completed(generation, result, notice) if generation == self.generation => {
                 self.busy = false;
+                self.dependency_report = None;
                 match result {
                     Ok(snapshot) => {
                         let c = &snapshot.config;
@@ -104,10 +110,75 @@ impl State {
                 }
             }
             Message::Completed(..) => {}
+            Message::DependenciesChecked(g, result) if g == self.generation => {
+                self.busy = false;
+                match result {
+                    Ok(report) => {
+                        self.dependency_report = Some(report);
+                        self.notice = "前置与冲突求解完成；结果为只读建议。".into();
+                    }
+                    Err(error) => self.notice = format!("依赖检查失败：{error}"),
+                }
+            }
+            Message::CandidateFiles(g, paths) if g == self.generation => {
+                if paths.is_empty() {
+                    self.busy = false;
+                    self.notice = "已取消候选选择。".into();
+                    return Task::none();
+                }
+                self.busy = true;
+                let root = self.root.clone();
+                let key = self.instance.clone();
+                return Task::perform(
+                    async move {
+                        mc_core::service::mod_resolver::inventory::solve_candidate_files(
+                            &root, &key, paths,
+                        )
+                        .await
+                    },
+                    move |result| Message::DependenciesChecked(g, result),
+                );
+            }
+            Message::DependenciesChecked(..) | Message::CandidateFiles(..) => {}
             Message::Tab(value) => self.mods_tab = value,
             Message::Query(value) => self.query = value,
             Message::CancelRemove => self.remove = None,
             _ if self.busy || blocked => {}
+            Message::CheckDependencies => {
+                self.busy = true;
+                self.dependency_report = None;
+                self.notice = "正在读取本地元数据并求解前置与冲突…".into();
+                let g = self.generation;
+                let root = self.root.clone();
+                let key = self.instance.clone();
+                return Task::perform(
+                    async move {
+                        mc_core::service::mod_resolver::inventory::inspect_instance(&root, &key)
+                            .await
+                            .map(|inventory| inventory.audit())
+                    },
+                    move |result| Message::DependenciesChecked(g, result),
+                );
+            }
+            Message::ImportCandidates => {
+                self.busy = true;
+                self.dependency_report = None;
+                let g = self.generation;
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("选择候选 JAR（仅求解，不导入实例）")
+                            .add_filter("候选 Mod JAR", &["jar"])
+                            .pick_files()
+                            .await
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|file| file.path().to_owned())
+                            .collect()
+                    },
+                    move |paths| Message::CandidateFiles(g, paths),
+                );
+            }
             Message::Name(v) => self.name = v,
             Message::Java(v) => self.java = v,
             Message::Memory(v) => self.memory = v,
@@ -317,6 +388,22 @@ pub fn view(state: &State, blocked: bool) -> Element<'_, AppMessage> {
             ]
             .spacing(8),
         );
+        body = body.push(
+            row![
+                button(label("检查前置与冲突", 12.))
+                    .padding(10)
+                    .style(theme::quiet)
+                    .on_press_maybe(enabled.then_some(dispatch(Message::CheckDependencies))),
+                button(label("选择候选 JAR 求解", 12.))
+                    .padding(10)
+                    .style(theme::quiet)
+                    .on_press_maybe(enabled.then_some(dispatch(Message::ImportCandidates)))
+            ]
+            .spacing(8),
+        );
+        if let Some(report) = &state.dependency_report {
+            body = body.push(crate::dependency_view::view(report));
+        }
         body = body.push(
             text_input("按名称或文件名搜索 Mod", &state.query)
                 .padding(10)

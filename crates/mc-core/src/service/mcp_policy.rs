@@ -69,7 +69,7 @@ impl McpPolicy {
                 "minecraft_list_versions" | "minecraft_search_mods" | "minecraft_get_mod_info" => {
                     self.permissions.catalog
                 }
-                "minecraft_list_instances" => self.permissions.instances,
+                "minecraft_list_instances" | "minecraft_resolve_dependencies" => self.permissions.instances,
                 "minecraft_list_instance_logs" | "minecraft_read_instance_log" | "minecraft_analyze_logs" => {
                     self.permissions.logs
                 }

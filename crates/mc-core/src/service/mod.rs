@@ -7,6 +7,7 @@ pub mod mcp_policy;
 pub mod resources;
 pub mod desktop_instances;
 pub mod resource_install;
+pub mod mod_resolver;
 pub mod task;
 
 pub use catalog::*;

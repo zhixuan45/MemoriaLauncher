@@ -1,0 +1,320 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "missing_dependency",
+      "category": "missing_dependency",
+      "title": "缺少必需依赖",
+      "action": "核对所列 Mod 的必需依赖、游戏版本和加载器后重新生成安装预览。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 50,
+      "any": [
+        "(?i)(requires.*(?:missing|not installed|is absent)|depends on.*(?:missing|not installed)|missing (?:or unsupported )?(?:mandatory )?dependenc|requires .*version .*of .*, which is missing)",
+        "(?i)Mod .+? \\((?P<mod_id>[^()\\s]+)\\).*?requires (?P<required_version>.+?) of (?:mod )?'[^']+' \\((?P<required_mod_id>[^()\\s]+)\\).*(?:missing|not installed)"
+      ],
+      "all": [],
+      "exclude": [
+        "(?i)(?:optional dependency|optional mod|not required)"
+      ],
+      "context_lines": 0,
+      "capture_fields": [
+        "mod_id",
+        "required_version",
+        "required_mod_id"
+      ]
+    },
+    {
+      "id": "loader_mismatch",
+      "category": "loader_mismatch",
+      "title": "加载器或 Mod 版本不兼容",
+      "action": "核对 Minecraft、加载器和 Mod 支持的版本，勿混用不同加载器的文件。",
+      "severity": "error",
+      "confidence": "medium",
+      "priority": 20,
+      "any": [
+        "(?i)(incompatible mod set|incompatible mods found|requires.*(?:fabricloader|fabric loader|quilt_loader|minecraft|neoforge|forge).*but|requires .*version .*of .*but only|mod .*requires .*minecraft|unsupported.*(?:loader|minecraft).*version)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "java_version",
+      "category": "java_version",
+      "title": "Java 版本不兼容",
+      "action": "按实例声明的 Java 要求选择运行环境；class file 52/61/65 分别对应 Java 8/17/21。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 20,
+      "any": [
+        "(?i)(UnsupportedClassVersionError|class file version.*(?:recognizes|supported)|requires java|java.*version.*(?:not supported|unsupported)|Unsupported major.minor version)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "out_of_memory",
+      "category": "out_of_memory",
+      "title": "内存不足或分配失败",
+      "action": "检查可用内存、Java 位数和实例分配值；不要直接将内存调到系统总量。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 20,
+      "any": [
+        "(?i)(OutOfMemoryError|Could not reserve enough space|Cannot allocate memory|unable to create native thread|Native memory allocation.*failed)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "hash_mismatch",
+      "category": "hash_mismatch",
+      "title": "文件完整性校验失败",
+      "action": "核对文件来源并重新下载受影响文件，保留旧文件供检查。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 20,
+      "any": [
+        "(?i)(hash mismatch|checksum.*(?:mismatch|failed|invalid)|sha-?(?:1|256|512).*(?:mismatch|does not match)|文件校验哈希不匹配)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "mixin_conflict",
+      "category": "mixin_conflict",
+      "title": "Mixin 注入失败，需人工确认",
+      "action": "结合完整 Caused by 链及涉及的 Mod 版本定位；不要据此自动删除 Mod。",
+      "severity": "error",
+      "confidence": "medium",
+      "priority": 20,
+      "any": [
+        "(?i)(MixinApplyError|MixinTransformerError|InvalidMixinException|InjectionError|Critical injection failure|Mixin apply.*failed)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "class_loading",
+      "category": "class_loading",
+      "title": "类加载失败，需人工确认",
+      "action": "检查缺失类对应的依赖和加载器版本；仅凭类名不能确定应删除哪个 Mod。",
+      "severity": "error",
+      "confidence": "medium",
+      "priority": 20,
+      "any": [
+        "(?i)(NoClassDefFoundError|ClassNotFoundException|NoSuchMethodError|NoSuchFieldError|LinkageError)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "graphics_driver",
+      "category": "graphics_driver",
+      "title": "图形环境初始化失败",
+      "action": "检查显卡驱动、OpenGL 支持及远程桌面环境。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 20,
+      "any": [
+        "(?i)(GLFW error 6554[23]|does not support OpenGL|Failed to create window|Pixel format not accelerated|Could not initialize.*GLFW)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "network",
+      "category": "network",
+      "title": "网络或证书连接失败",
+      "action": "检查源站可用性、代理和系统时间；保留 TLS 验证。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 20,
+      "any": [
+        "(?i)(UnknownHostException|ConnectException|SocketTimeoutException|SSLHandshakeException|PKIX path building failed|Connection timed out)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "jvm_crash",
+      "category": "jvm_crash",
+      "title": "JVM 原生崩溃",
+      "action": "检查 hs_err 日志中的 Problematic frame、驱动及 Java 版本，保留完整崩溃报告。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 20,
+      "any": [
+        "(?i)(A fatal error has been detected by the Java Runtime|EXCEPTION_ACCESS_VIOLATION|SIGSEGV.*(?:0x|pc=)|Problematic frame:)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 0,
+      "capture_fields": []
+    },
+    {
+      "id": "forge_missing_dependency",
+      "category": "missing_dependency",
+      "title": "Forge/NeoForge 缺少前置",
+      "action": "核对 Requested by、Mod ID 与 Expected range 后重新求解前置。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?im)Mod ID: '(?P<required_mod_id>[a-z0-9_\\-]+)'[^\\n]*Requested by: '(?P<mod_id>[a-z0-9_\\-]+)'[^\\n]*Expected range: '(?P<required_version>[^']+)'[^\\n]*(?:MISSING|not installed)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": [
+        "mod_id",
+        "required_mod_id",
+        "required_version"
+      ]
+    },
+    {
+      "id": "duplicate_mod",
+      "category": "duplicate_mod",
+      "title": "重复的 Mod 身份或版本",
+      "action": "保留文件备份，在依赖检查中核对重复 ID 与来源。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(DuplicateModsFoundException|Duplicate mod(?:s| ID)?|Found duplicate mods|重复的 Mod)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    },
+    {
+      "id": "archive_corrupt",
+      "category": "archive_corrupt",
+      "title": "JAR/ZIP 文件损坏",
+      "action": "核对该文件的来源和哈希，重新下载后再生成安装预览。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(ZipException:|zip END header not found|invalid LOC header|invalid CEN header|error in opening zip file)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    },
+    {
+      "id": "disk_space",
+      "category": "disk_space",
+      "title": "磁盘空间不足",
+      "action": "检查实例及临时目录所在磁盘的可用空间。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(No space left on device|There is not enough space on the disk|磁盘空间不足)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    },
+    {
+      "id": "file_permissions",
+      "category": "file_permissions",
+      "title": "文件访问被拒绝",
+      "action": "检查文件权限、只读状态和是否被其他进程占用。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(AccessDeniedException|Permission denied|being used by another process|拒绝访问)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    },
+    {
+      "id": "config_parse",
+      "category": "config_parse",
+      "title": "配置文件格式解析失败",
+      "action": "保留原文件，核对解析器给出的文件和行号后修复语法。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(ParsingException:|JsonSyntaxException|MalformedJsonException|Toml.*(?:parse|syntax).*error|Failed to load config)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    },
+    {
+      "id": "missing_file",
+      "category": "missing_file",
+      "title": "所需文件未找到",
+      "action": "先核对完整路径与文件来源，不要仅凭文件名下载替代文件。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(FileNotFoundException|NoSuchFileException)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    },
+    {
+      "id": "argument_failure",
+      "category": "argument_failure",
+      "title": "Java 启动参数无效",
+      "action": "检查实例的 JVM 参数以及对应 Java 主版本。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(Unrecognized VM option|Unrecognized option:|Could not create the Java Virtual Machine)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    },
+    {
+      "id": "port_conflict",
+      "category": "port_conflict",
+      "title": "端口绑定失败",
+      "action": "检查日志所示端口是否已被其他程序占用。",
+      "severity": "error",
+      "confidence": "high",
+      "priority": 40,
+      "any": [
+        "(?i)(BindException:.*Address already in use|FAILED TO BIND TO PORT)"
+      ],
+      "all": [],
+      "exclude": [],
+      "context_lines": 1,
+      "capture_fields": []
+    }
+  ]
+}

@@ -35,7 +35,7 @@ async fn permissions_filter_tool_discovery_and_deny_ungranted_tools_and_instance
     )
     .await
     .unwrap();
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 5);
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 6);
     for name in ["minecraft_list_versions", "run_shell"] {
         let denied = dispatch_with_policy(
             json!({"jsonrpc":"2.0", "id":2,"method":"tools/call", "params":{"name":name}}),
@@ -74,6 +74,13 @@ async fn permissions_filter_tool_discovery_and_deny_ungranted_tools_and_instance
         policy.permissions.logs=enabled;
         let analyzed=dispatch_with_policy(json!({"jsonrpc":"2.0","id":52,"method":"tools/call","params":{"name":"minecraft_analyze_logs","arguments":{"instance_id":id,"path":"logs/latest.log"}}}),&catalog,Path::new("ignored"),Some(&policy)).await.unwrap();
         assert_eq!(analyzed["result"]["structuredContent"]["code"],"PERMISSION_DENIED");
+    }
+    policy.permissions.logs=true;
+    let dependencies=dispatch_with_policy(json!({"jsonrpc":"2.0","id":61,"method":"tools/call","params":{"name":"minecraft_resolve_dependencies","arguments":{"instance_id":"versions/allowed"}}}),&catalog,Path::new("ignored"),Some(&policy)).await.unwrap();
+    assert_eq!(dependencies["result"]["structuredContent"]["read_only"],true);
+    assert_eq!(dependencies["result"]["structuredContent"]["local_report"]["status"],"resolved");
+    for args in [json!({"instance_id":"versions/denied"}),json!({"instance_id":"versions/allowed","roots":[{"project":"project","version":"version"}]})] {
+        let denied=dispatch_with_policy(json!({"jsonrpc":"2.0","id":62,"method":"tools/call","params":{"name":"minecraft_resolve_dependencies","arguments":args}}),&catalog,Path::new("ignored"),Some(&policy)).await.unwrap();assert_eq!(denied["result"]["structuredContent"]["code"],"PERMISSION_DENIED");
     }
     policy.enabled = false;
     let disabled = dispatch_with_policy(

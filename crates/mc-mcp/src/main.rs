@@ -10,6 +10,7 @@ use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 const PROTOCOL: &str = "2025-06-18";
 mod write_tools;
+mod dependency_tools;
 
 #[tokio::main]
 async fn main() {
@@ -103,7 +104,7 @@ fn tool_error(code: &str, message: &str) -> Value {
 }
 
 fn tool_definitions() -> Value {
-    json!([
+    let mut definitions=json!([
         {"name": "minecraft_list_versions",
          "description": "List real Mojang Minecraft version metadata (read-only).",
          "annotations": {"readOnlyHint": true},
@@ -150,7 +151,9 @@ fn tool_definitions() -> Value {
              "instance_id": {"type": "string", "minLength": 1, "maxLength": 240},
              "path": {"type": "string", "minLength": 1, "maxLength": 300}
          }, "required": ["instance_id", "path"], "additionalProperties": false}}
-    ])
+    ]);
+    definitions.as_array_mut().unwrap().push(dependency_tools::definition());
+    definitions
 }
 
 fn string_arg<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -181,6 +184,7 @@ fn verify_args(args: &Value, allowed: &[&str]) -> Result<(), &'static str> {
 
 async fn call_tool(name: &str, args: &Value, catalog: &OnlineCatalog, root: &Path) -> Value {
     let result: Result<Value, (String, String)> = match name {
+        "minecraft_resolve_dependencies"=>dependency_tools::call(args,root).await,
         "minecraft_list_instance_logs" | "minecraft_read_instance_log" | "minecraft_analyze_logs" => {
             call_log_tool(name, args, root).await
         }
@@ -296,7 +300,8 @@ async fn call_log_tool(name: &str, args: &Value, root: &Path) -> Result<Value, (
             .filter(|path| path.len() <= 300)
             .ok_or_else(|| invalid("path is required (max 300 bytes)"))?;
         if name == "minecraft_analyze_logs" {
-            let analysis=mc_core::runtime::diagnostics::analyze_instance_log(layout,instance.to_owned(),path.to_owned(),None)
+            let rules=mc_core::runtime::diagnostic_rules::RuleSet::load(&policy_path().with_file_name("diagnostic-rules.json")).map_err(|e|("LOG_ANALYSIS_FAILED".into(),e))?;
+            let analysis=mc_core::runtime::diagnostics::analyze_instance_with_rules(layout,instance.to_owned(),path.to_owned(),None,&rules)
                 .await.map_err(|e|("LOG_ANALYSIS_FAILED".into(),e.to_string()))?;
             return Ok(json!({"instance_id":instance,"path":path,"analysis":analysis,"untrusted_data":true}));
         }
@@ -370,9 +375,10 @@ async fn dispatch_with_policy(
                     let args = args.cloned().unwrap_or_else(|| json!({}));
                     let denied = policy.is_some_and(|policy| {
                         !policy.allows_tool(name)
+                            || (name=="minecraft_resolve_dependencies" && args.get("roots").and_then(Value::as_array).is_some_and(|roots|!roots.is_empty()) && !policy.permissions.catalog)
                             || (matches!(
                                 name,
-                                "minecraft_list_instance_logs" | "minecraft_read_instance_log" | "minecraft_analyze_logs"
+                                "minecraft_list_instance_logs" | "minecraft_read_instance_log" | "minecraft_analyze_logs" | "minecraft_resolve_dependencies"
                             ) && !args
                                 .get("instance_id")
                                 .and_then(Value::as_str)
@@ -497,7 +503,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 7);
+        assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 8);
         assert!(dispatch(
             json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
             &c,

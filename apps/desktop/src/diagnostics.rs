@@ -21,6 +21,10 @@ pub enum Message {
     Picked(u64, Option<PathBuf>),
     Listed(u64, Result<Vec<InstanceLog>, String>),
     Analyzed(u64, Result<Analysis, String>),
+    ImportRules,
+    RestoreRules,
+    RulesPicked(u64, Option<PathBuf>),
+    RulesStored(u64, Result<String, String>),
 }
 #[derive(Default)]
 pub struct State {
@@ -34,6 +38,8 @@ pub struct State {
     pub notice: String,
     pub exit_code: Option<i32>,
     pub exit_path: String,
+    pub rule_notice: String,
+    imported_file: Option<PathBuf>,
 }
 impl State {
     pub fn open(
@@ -60,6 +66,38 @@ impl State {
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::RulesStored(g, result) if g == self.generation => {
+                self.busy = false;
+                match result {
+                    Ok(notice) => {
+                        self.rule_notice = notice;
+                        if let Some(path) = self.imported_file.clone() {
+                            return self.update(Message::Picked(g, Some(path)));
+                        }
+                        if !self.selected.is_empty() {
+                            return self.update(Message::Select(self.selected.clone()));
+                        }
+                    }
+                    Err(error) => self.rule_notice = format!("规则保存失败，原配置保留：{error}"),
+                }
+            }
+            Message::RulesPicked(g, Some(source)) if g == self.generation => {
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            mc_core::runtime::diagnostic_rules::import_custom(&source, &rule_path())
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?
+                    },
+                    move |result| Message::RulesStored(g, result),
+                );
+            }
+            Message::RulesPicked(g, None) if g == self.generation => {
+                self.busy = false;
+                self.rule_notice = "已取消规则导入。".into();
+            }
+            Message::RulesStored(..) | Message::RulesPicked(..) => {}
             Message::Listed(g, result) if g == self.generation => {
                 self.busy = false;
                 match result {
@@ -89,6 +127,7 @@ impl State {
                 }
             }
             Message::Picked(g, Some(path)) if g == self.generation => {
+                self.imported_file = Some(path.clone());
                 self.selected = path
                     .file_name()
                     .unwrap_or_default()
@@ -98,10 +137,15 @@ impl State {
                 self.busy = true;
                 return Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || service::analyze_file(&path))
-                            .await
-                            .map_err(|e| e.to_string())?
-                            .map_err(|e| e.to_string())
+                        tokio::task::spawn_blocking(move || {
+                            let rules =
+                                mc_core::runtime::diagnostic_rules::RuleSet::load(&rule_path())?;
+                            service::analyze_file_with_rules(&path, &rules)
+                                .map_err(|e| e.to_string())
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .map_err(|e| e.to_string())
                     },
                     move |r| Message::Analyzed(g, r),
                 );
@@ -145,6 +189,7 @@ impl State {
                 self.busy = true;
                 self.analysis = None;
                 self.selected = path.clone();
+                self.imported_file = None;
                 self.notice = "正在本地解析日志…".into();
                 let root = self.root.clone();
                 let instance = self.instance.clone();
@@ -156,11 +201,14 @@ impl State {
                 };
                 return Task::perform(
                     async move {
-                        service::analyze_instance_log(
+                        let rules =
+                            mc_core::runtime::diagnostic_rules::RuleSet::load(&rule_path())?;
+                        service::analyze_instance_with_rules(
                             GameLayout::new(root).map_err(|e| e.to_string())?,
                             instance,
                             path,
                             code,
+                            &rules,
                         )
                         .await
                         .map_err(|e| e.to_string())
@@ -183,9 +231,43 @@ impl State {
                     move |r| Message::Picked(g, r),
                 );
             }
+            Message::ImportRules => {
+                self.generation += 1;
+                let g = self.generation;
+                self.busy = true;
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("导入追加诊断规则")
+                            .add_filter("诊断规则 JSON", &["json"])
+                            .pick_file()
+                            .await
+                            .map(|file| file.path().to_owned())
+                    },
+                    move |path| Message::RulesPicked(g, path),
+                );
+            }
+            Message::RestoreRules => {
+                self.generation += 1;
+                let g = self.generation;
+                self.busy = true;
+                return Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(|| {
+                            mc_core::runtime::diagnostic_rules::restore_builtin(&rule_path())
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?
+                    },
+                    move |result| Message::RulesStored(g, result),
+                );
+            }
         }
         Task::none()
     }
+}
+fn rule_path() -> PathBuf {
+    crate::accounts::data_dir().join("diagnostic-rules.json")
 }
 fn dispatch(message: Message) -> AppMessage {
     AppMessage::Diagnostics(message)
@@ -206,6 +288,21 @@ pub fn summary(analysis: &Analysis) -> Element<'_, AppMessage> {
     )
     .color(MUTED)]
     .spacing(12);
+    findings = findings.push(
+        label(
+            format!(
+                "使用 {} 条规则{}",
+                analysis.rules_applied,
+                if analysis.rule_limit_reached {
+                    " · 命中数量达到预算，可能有未列出的匹配"
+                } else {
+                    ""
+                }
+            ),
+            10.,
+        )
+        .color(MUTED),
+    );
     for finding in &analysis.findings {
         let mut card = column![
             bold(&finding.title, 14.),
@@ -216,6 +313,27 @@ pub fn summary(analysis: &Analysis) -> Element<'_, AppMessage> {
             .color(MUTED)
         ]
         .spacing(6);
+        card = card.push(
+            label(
+                format!(
+                    "规则 {} · 片段行 {:?}",
+                    finding.rule_id, finding.source_lines
+                ),
+                10.,
+            )
+            .color(MUTED),
+        );
+        if let Some(id) = &finding.required_mod_id {
+            card = card.push(label(
+                format!(
+                    "Mod {} → 前置 {} {}",
+                    finding.mod_id.as_deref().unwrap_or("未提取"),
+                    id,
+                    finding.required_version.as_deref().unwrap_or("")
+                ),
+                11.,
+            ));
+        }
         for evidence in &finding.evidence {
             card = card.push(label(evidence, 11.).color(MUTED));
         }
@@ -234,7 +352,15 @@ pub fn view(state: &State) -> Element<'_, AppMessage> {
             button(label("导入文本日志", 12.))
                 .padding(10)
                 .style(theme::quiet)
-                .on_press(dispatch(Message::Import))
+                .on_press(dispatch(Message::Import)),
+            button(label("导入诊断规则", 12.))
+                .padding(10)
+                .style(theme::quiet)
+                .on_press(dispatch(Message::ImportRules)),
+            button(label("恢复内置规则", 12.))
+                .padding(10)
+                .style(theme::quiet)
+                .on_press(dispatch(Message::RestoreRules)),
         ]
         .spacing(10),
         label(format!("实例：{}", state.instance), 11.).color(MUTED)
@@ -260,7 +386,8 @@ pub fn view(state: &State) -> Element<'_, AppMessage> {
         scrollable(content)
             .direction(theme::scroll_direction())
             .height(Fill),
-        label(&state.notice, 12.).color(MUTED)
+        label(&state.notice, 12.).color(MUTED),
+        label(&state.rule_notice, 11.).color(MUTED)
     ]
     .spacing(10)
     .height(420)

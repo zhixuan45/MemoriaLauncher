@@ -1,6 +1,8 @@
 use super::*;
 use std::io::Write;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[path="resource_solver_tests.rs"]
+mod solver_integration;
 
 #[tokio::test]
 #[ignore = "requires live Modrinth metadata and CDN downloads"]

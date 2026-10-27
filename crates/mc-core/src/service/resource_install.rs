@@ -18,6 +18,8 @@ use std::{
 
 const MANIFEST: &str = ".memoria/resource-install.json";
 const LIMIT: usize = 64 * 1024 * 1024;
+#[path = "resource_dependencies.rs"]
+mod dependencies;
 #[derive(Debug, Clone)]
 pub struct Request {
     pub root: PathBuf,
@@ -51,6 +53,7 @@ pub struct Preview {
     pub target: String,
     pub bytes: u64,
     watches: Vec<files::Watch>,
+    environment_digest: String,
     #[cfg(test)]
     fail_commit_at: Option<usize>,
 }
@@ -194,6 +197,15 @@ fn check_url(value: &str) -> Result<()> {
 }
 async fn download(client: &DownloadClient, file: &InstallFile) -> Result<Vec<u8>> {
     if let Some(bytes) = &file.inline {
+        if !file.sha1.is_empty()
+            && (bytes.len() as u64 != file.size
+                || !format!("{:x}", Sha1::digest(bytes)).eq_ignore_ascii_case(&file.sha1)
+                || file.sha512.as_ref().is_some_and(|hash| {
+                    !format!("{:x}", Sha512::digest(bytes)).eq_ignore_ascii_case(hash)
+                }))
+        {
+            return Err(format!("文件校验失败：{}", file.path));
+        }
         return Ok(bytes.clone());
     }
     let mut last = "下载失败".to_string();
@@ -238,6 +250,8 @@ async fn prepare_with(
         .ok_or("目标实例元数据无效")?;
     let (loader, loader_version) = loader(target.instance.loader.as_ref());
     let game = &target.instance.mc_version;
+    let environment_digest =
+        super::mod_resolver::inventory::environment_digest(&request.root, &request.instance)?;
     let mut watches = vec![
         files::Watch::file(&base, MANIFEST).map_err(error)?,
         files::Watch::directory(&base, "mods").map_err(error)?,
@@ -256,10 +270,12 @@ async fn prepare_with(
     let records = previous["resources"]
         .as_array_mut()
         .ok_or("已安装资源清单损坏")?;
-    let mut queue = VecDeque::from([(request.project.clone(), request.version.clone())]);
+    let (mut queue, mut solver_warnings) =
+        dependencies::resolve_remote(&request, &catalog, &base, records, game, loader).await?;
     let mut resolved = HashMap::<String, String>::new();
     let mut output = Vec::new();
     let mut warnings = Vec::new();
+    warnings.append(&mut solver_warnings);
     let mut incompatible = Vec::new();
     let mut title = String::new();
     while let Some((project, version)) = queue.pop_front() {
@@ -381,7 +397,10 @@ async fn prepare_with(
             records.push(json!({"project":project,"version":version,"path":descriptor.path}));
             output.push(descriptor);
         }
-        if let Some(deps) = metadata["dependencies"].as_array() {
+        if let Some(deps) = metadata["dependencies"]
+            .as_array()
+            .filter(|_| request.kind != ResourceKind::Mod)
+        {
             for dep in deps {
                 match dep["dependency_type"].as_str() {
                     Some("required") if kind != ResourceKind::Modpack => {
@@ -444,6 +463,11 @@ async fn prepare_with(
             return Err("所选资源与已安装或本次计划中的资源不兼容".into());
         }
     }
+    if output.iter().map(|file| file.size).sum::<u64>() > 1024 * 1024 * 1024 {
+        return Err("单次计划超过 1 GiB".into());
+    }
+    dependencies::audit_preview(&request, &client, &mut output, &mut watches, &mut warnings)
+        .await?;
     let mut names = std::collections::HashSet::new();
     let mut total = 0;
     for entry in &output {
@@ -485,6 +509,7 @@ async fn prepare_with(
         ),
         bytes: total,
         watches,
+        environment_digest,
         #[cfg(test)]
         fail_commit_at: None,
     })
@@ -616,6 +641,13 @@ pub async fn install(
 ) -> Result<String> {
     let base = directory(&preview.request.root, &preview.request.instance)?;
     let _lock = files::lock(&base).map_err(error)?;
+    if super::mod_resolver::inventory::environment_digest(
+        &preview.request.root,
+        &preview.request.instance,
+    )? != preview.environment_digest
+    {
+        return Err("实例环境已变化，请重新预览".into());
+    }
     for watch in &preview.watches {
         watch.check(&base).map_err(error)?;
     }
@@ -663,6 +695,13 @@ pub async fn install(
     }
     for watch in &preview.watches {
         watch.check(&base).map_err(error)?;
+    }
+    if super::mod_resolver::inventory::environment_digest(
+        &preview.request.root,
+        &preview.request.instance,
+    )? != preview.environment_digest
+    {
+        return Err("实例环境已变化，请重新预览".into());
     }
     let mut committed: Vec<(PathBuf, Option<PathBuf>, Option<String>)> = Vec::new();
     let result = (|| -> Result<()> {

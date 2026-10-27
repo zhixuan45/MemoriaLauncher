@@ -191,6 +191,12 @@ impl ResourceCatalog {
         self.get(&format!("/project/{project}/version"), &parameters)
             .await
     }
+    pub(crate) async fn version_metadata(&self,project:&str,game:&str,loader:&str)->LauncherResult<Vec<serde_json::Value>> {
+        if !super::mod_resolver::identifier(project)||project.contains(':') {return Err(LauncherError::InvalidMetadata("资源项目 ID 无效".into()));}
+        let mut parameters=vec![("game_versions",serde_json::to_string(&[game])?)];
+        if !loader.is_empty(){parameters.push(("loaders",serde_json::to_string(&[loader])?));}
+        self.get(&format!("/project/{project}/version"),&parameters).await
+    }
 }
 
 #[cfg(test)]

@@ -80,6 +80,13 @@ async fn running_server_reloads_saved_permissions_and_never_falls_back_from_a_br
     assert!(!denied.to_string().contains("two private log"));
     let analysis=request(&mut input,&mut output,json!({"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"minecraft_analyze_logs","arguments":{"instance_id":"versions/one","path":"logs/latest.log"}}})).await;
     assert_eq!(analysis["result"]["structuredContent"]["analysis"]["findings"][0]["category"],"unknown");
+    let dependencies=request(&mut input,&mut output,json!({"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"minecraft_resolve_dependencies","arguments":{"instance_id":"versions/one"}}})).await;
+    assert_eq!(dependencies["result"]["structuredContent"]["read_only"],true);
+    assert!(!directory.join("games/versions/one/.memoria").exists());
+    policy.permissions.instances=false;policy.save(&path).await.unwrap();
+    let dependencies=request(&mut input,&mut output,json!({"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"minecraft_resolve_dependencies","arguments":{"instance_id":"versions/one"}}})).await;
+    assert_eq!(dependencies["result"]["structuredContent"]["code"],"PERMISSION_DENIED");
+    policy.permissions.instances=true;
     policy.permissions.logs = false;
     policy.save(&path).await.unwrap();
     let revoked = request(&mut input, &mut output, json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"minecraft_read_instance_log","arguments":{"instance_id":"versions/one","path":"logs/latest.log"}}})).await;

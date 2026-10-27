@@ -22,6 +22,7 @@ reqwest = { version = "0.13.3", default-features = false, features = ["json", "q
 
 [dev-dependencies]
 iced_test = "0.14"
+zip = { version = "6", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
 serde = { workspace = true }

@@ -25,9 +25,12 @@ Windows 可设置 MEMORIA_GAME_ROOT 为 Minecraft 的根目录；未设置时尝
 | minecraft_get_mod_info | Modrinth V2 /project | 项目描述、许可、版本 ID |
 | minecraft_list_instance_logs | 指定实例的日志目录 | 列出最近最多 100 个日志，包含相对路径、类型、大小、修改时间 |
 | minecraft_read_instance_log | 指定实例的日志文件 | 读取日志末尾，默认 32 KiB、最大 64 KiB；遮蔽常见凭据行 |
-| minecraft_analyze_logs | 指定实例的日志文件 | 本地解析末尾 64 KiB，返回异常分类、遮蔽证据、置信度及排查建议，不执行修复 |
+| minecraft_analyze_logs | 指定实例的日志文件 | 按内置及已导入规则解析末尾 64 KiB，返回规则 ID、分类、遮蔽证据、置信度及建议 |
+| minecraft_resolve_dependencies | 启用的本地 JAR；可选 Modrinth 元数据 | 只读检查前置/冲突，附 roots 时回溯生成源站依赖计划，不安装文件 |
 
 示例工具入参：`{"query":"sodium","minecraft_version":"1.21","loader":"fabric","limit":5}`。
+
+`minecraft_resolve_dependencies` 接受 `instance_id`，可选 `roots: [{"project":"项目 ID","version":"版本 ID"}]`（最多 16 个）。需要实例读取及实例白名单；非空 roots 另需目录读取权限。返回本地报告、远程计划及文件/环境快照。远程计划只检查源站项目约束，不下载候选 JAR；未知不表示兼容，不产生写入授权。格式、状态与限制见[依赖求解说明](dependency-resolution-and-rules.md)。
 
 ### 分析实例崩溃日志
 

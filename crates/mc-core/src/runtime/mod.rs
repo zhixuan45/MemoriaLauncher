@@ -6,6 +6,7 @@ mod launch;
 mod layout;
 mod logs;
 pub mod diagnostics;
+pub mod diagnostic_rules;
 pub mod loaders;
 mod metadata;
 mod natives;

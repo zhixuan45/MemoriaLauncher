@@ -782,6 +782,7 @@ dependencies = [
  "url",
  "uuid",
  "windows-sys 0.61.2",
+ "zip 6.0.0",
 ]
 
 [[package]]
@@ -2169,6 +2170,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rustls",
+ "semver",
  "serde",
  "serde_json",
  "sha1 0.10.7",
