@@ -43,7 +43,7 @@ The previous application subscribed to every runtime input event, including ordi
 
 The desktop now scans local instances, persists Microsoft accounts using the Windows credential vault, launches through the existing core runtime, and reads Mojang's official version manifest. See [Desktop data sources](real-data-integration.md) for configuration and validation boundaries. Sample providers remain available as test fixtures.
 
-Modrinth mod/modpack/resource-pack/shader catalogues now support search, version/loader filters, pagination and version-file/dependency inspection. Image/text/PDF attachments are supported; third-party installation and AI tool execution remain unavailable. Their actions explain the missing service and never fabricate successful work. Vanilla installation now downloads verified files through the configured source and concurrency limit. Game/download/AI/account configuration is persistent; other general switches retain their session-only behavior.
+Modrinth mod/modpack/resource-pack/shader catalogues support search, version/loader filters, pagination and version-file/dependency inspection. Third-party installation now includes target selection, required dependencies, verified staging and rollback; see [instance management](instance-management.md). Image/text/PDF attachments are supported; AI tool execution remains unavailable. Vanilla installation downloads verified files through the configured source and concurrency limit. Game/download/AI/account/appearance/general configuration is persistent. General preferences now drive real window behavior and date formatting, with scoped import/export, recoverable cache movement and release checks; see [general settings](general-settings.md).
 
 ## Verification
 

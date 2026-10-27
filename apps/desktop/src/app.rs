@@ -118,6 +118,7 @@ pub enum Message {
     Minimize,
     Maximize,
     Close,
+    Quit,
     Profile,
     LoginSettings,
     Settings(crate::settings::Message),
@@ -216,7 +217,7 @@ impl Launcher {
             environment_saving: false,
             launching: false,
             crash: None,
-            settings: crate::settings::State::default(),
+            settings: crate::settings::State::load(),
             download,
             ai,
             workspace: crate::workspace::State::default(),
@@ -292,6 +293,7 @@ impl Launcher {
                 if self.verification.enabled() {
                     return verification::after_load(self);
                 }
+                return self.settings.startup();
             }
             Message::Navigate(page) => {
                 if self.page != page {
@@ -406,7 +408,12 @@ impl Launcher {
                     provider,
                 );
             }
-            Message::GameStarted(status) => self.status = status,
+            Message::GameStarted(status) => {
+                self.status = status;
+                if self.settings.saved.minimize_on_launch {
+                    return window::latest().and_then(|id| window::minimize(id, true));
+                }
+            }
             Message::GameFinished(result) => {
                 self.launching = false;
                 match result {
@@ -568,6 +575,9 @@ impl Launcher {
             }
             Message::Event(Event::Window(window::Event::Unfocused)) => self.drag = None,
             Message::Event(Event::Window(window::Event::Resized(size))) => self.viewport = size,
+            Message::Event(Event::Window(window::Event::CloseRequested)) => {
+                return self.update(Message::Close)
+            }
             Message::Event(Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
@@ -580,10 +590,16 @@ impl Launcher {
             Message::DragWindow => return window::latest().and_then(window::drag),
             Message::Minimize => return window::latest().and_then(|id| window::minimize(id, true)),
             Message::Maximize => return window::latest().and_then(window::toggle_maximize),
-            Message::Close => return iced::exit(),
+            Message::Close => {
+                if self.settings.saved.minimize_on_close {
+                    return window::latest().and_then(|id| window::minimize(id, true));
+                }
+                return iced::exit();
+            }
+            Message::Quit => return iced::exit(),
             Message::Profile => self.open_modal(Modal::Profile),
             Message::LoginSettings => {
-                self.settings.update(
+                let _ = self.settings.update(
                     crate::settings::Message::Tab(crate::settings::LOGIN_TAB),
                     self.animation_time,
                 );
@@ -591,13 +607,30 @@ impl Launcher {
             }
             Message::Settings(message) => {
                 self.animation_time = Instant::now().max(self.animation_time);
-                self.settings.update(message, self.animation_time);
-                if self.page == Page::Settings && self.settings.game_settings_visible() {
-                    return self
-                        .game_settings
-                        .ensure_java_loaded()
-                        .map(Message::GameSettings);
+                // Cache maintenance waits until all application writes are idle.
+                if matches!(message, crate::settings::Message::ConfirmCache)
+                    && (self.launching
+                        || self.instance_writing()
+                        || self.loading
+                        || self.environment_saving
+                        || self.download.installing.is_some())
+                {
+                    self.status = "请等待当前扫描、保存、游戏运行或安装完成后再清理缓存。".into();
+                    return Task::none();
                 }
+                let task = self
+                    .settings
+                    .update(message, self.animation_time)
+                    .map(Message::Settings);
+                if self.page == Page::Settings && self.settings.game_settings_visible() {
+                    return Task::batch([
+                        task,
+                        self.game_settings
+                            .ensure_java_loaded()
+                            .map(Message::GameSettings),
+                    ]);
+                }
+                return task;
             }
             Message::Download(message) => {
                 if let crate::download::Message::Resources(crate::resources::Message::Install(id))=&message {
@@ -668,7 +701,7 @@ impl Launcher {
                     .map(Message::McpSettings)
             }
             Message::Ai(crate::ai::Message::OpenSettings) => {
-                self.settings.update(
+                let _ = self.settings.update(
                     crate::settings::Message::Tab(crate::settings::AI_TAB),
                     self.animation_time,
                 );
@@ -760,7 +793,11 @@ fn layout_event(event: Event, _: event::Status, _: window::Id) -> Option<Message
 fn window_event(event: Event, _: event::Status, _: window::Id) -> Option<Message> {
     matches!(
         event,
-        Event::Window(window::Event::Resized(_) | window::Event::Unfocused)
+        Event::Window(
+            window::Event::Resized(_)
+                | window::Event::Unfocused
+                | window::Event::CloseRequested
+        )
             | Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..

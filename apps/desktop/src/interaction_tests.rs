@@ -837,3 +837,6 @@ mod workspace_ui;
 
 #[path = "instance_features_tests.rs"]
 mod instance_features;
+
+#[path = "general_ui_tests.rs"]
+mod general_settings;

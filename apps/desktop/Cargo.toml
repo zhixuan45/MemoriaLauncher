@@ -8,6 +8,7 @@ mc-core = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+semver = "1.0"
 async-trait = { workspace = true }
 uuid = { workspace = true }
 url = "2.5"

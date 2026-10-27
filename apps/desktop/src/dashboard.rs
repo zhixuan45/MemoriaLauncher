@@ -100,7 +100,7 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, Message> {
                             instance
                                 .instance
                                 .last_played_at
-                                .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+                                .map(|t| t.format(app.settings.saved.date_pattern()).to_string())
                                 .unwrap_or_else(|| "未记录".into())
                         ),
                         instance_stat("模组数量", instance.mods.clone()),

@@ -21,6 +21,7 @@ mod dashboard;
 mod download;
 mod download_settings;
 mod game_settings;
+mod general;
 mod home;
 #[cfg(test)]
 mod interaction_tests;
@@ -36,6 +37,7 @@ mod settings;
 mod shell;
 mod sidebar;
 mod theme;
+mod updates;
 mod verification;
 mod workspace;
 
@@ -55,6 +57,7 @@ fn main() -> iced::Result {
             min_size: Some(iced::Size::new(1024., 680.)),
             position: iced::window::Position::Centered,
             decorations: false,
+            exit_on_close_request: false,
             ..Default::default()
         });
     // Read the platform font at runtime instead of bundling a Windows font.

@@ -774,6 +774,7 @@ dependencies = [
  "mc-core",
  "reqwest",
  "rfd",
+ "semver",
  "serde",
  "serde_json",
  "sysinfo",

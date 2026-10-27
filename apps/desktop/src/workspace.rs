@@ -206,7 +206,8 @@ pub fn update(app: &mut Launcher, message: Message) -> Task<AppMessage> {
             return Task::none();
         }
         Message::ManageProjects => {
-            app.settings
+            let _ = app
+                .settings
                 .update(crate::settings::Message::Tab(1), app.animation_time);
             return app.update(AppMessage::Navigate(Page::Settings));
         }

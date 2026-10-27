@@ -1,9 +1,11 @@
 use crate::app::{Launcher, Message as AppMessage};
 use crate::assets::{icon, Icon};
+use crate::general::{self, Config, DATES};
 use crate::motion::{self, Toggle};
 use crate::motion_renderer::Element;
 use crate::theme::{self, bold, label, GREEN, MUTED, PURPLE, WHITE};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text_input, Space};
+use iced::Task;
 use iced::{Alignment, Color, Fill};
 use std::time::Instant;
 
@@ -19,34 +21,45 @@ const TABS: [&str; 8] = [
     "高级设置",
     "账户登录",
 ];
-const LANGUAGES: [&str; 3] = [
-    "简体中文 (Chinese)",
-    "繁體中文 (Traditional)",
-    "English (US)",
-];
-const REGIONS: [&str; 3] = ["中国大陆", "中国香港 / 台湾", "Global"];
-const DATES: [&str; 3] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY"];
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Tab(usize),
     Search(String),
     Toggle(usize, bool),
-    Language(&'static str),
-    Region(&'static str),
     Date(&'static str),
     Reset,
-    Notice(&'static str),
+    Revert,
+    Save,
+    Saved(Result<Config, String>),
+    Import,
+    Imported(Result<Option<Config>, String>),
+    Export,
+    Completed(Result<String, String>),
+    OpenData,
+    ClearCache,
+    ConfirmCache,
+    CancelCache,
+    CheckUpdate,
+    Checked(u64, Result<Option<crate::updates::Available>, String>),
+    OpenRelease,
 }
 
 pub struct State {
     tab: usize,
     query: String,
     switches: [Toggle; 5],
-    language: &'static str,
-    region: &'static str,
-    date: &'static str,
-    notice: &'static str,
+    pub saved: Config,
+    draft: Config,
+    notice: String,
+    busy: bool,
+    confirm_cache: bool,
+    checking: bool,
+    update_generation: u64,
+    update_notice: String,
+    available: Option<crate::updates::Available>,
+    startup_pending: bool,
+    directory: std::path::PathBuf,
 }
 
 impl Default for State {
@@ -54,54 +67,28 @@ impl Default for State {
         Self {
             tab: 0,
             query: String::new(),
-            switches: [false, true, true, false, false].map(Toggle::new),
-            language: LANGUAGES[0],
-            region: REGIONS[0],
-            date: DATES[0],
-            notice: "设置预览：开关与选项仅在本次会话生效，尚未保存到磁盘。",
+            switches: Config::default().switches().map(Toggle::new),
+            saved: Config::default(),
+            draft: Config::default(),
+            notice: "修改后点击保存常规设置，重启后继续生效。".into(),
+            busy: false,
+            confirm_cache: false,
+            checking: false,
+            update_generation: 0,
+            update_notice: "未检查更新".into(),
+            available: None,
+            startup_pending: true,
+            directory: crate::accounts::data_dir(),
         }
     }
 }
 
-impl State {
-    pub fn game_settings_visible(&self) -> bool {
-        matches!(self.tab, 1 | 3) && self.query.trim().is_empty()
-    }
-    pub fn animating(&self, now: Instant) -> bool {
-        self.switches.iter().any(|toggle| toggle.active(now))
-    }
+#[path = "settings_flow.rs"]
+mod flow;
 
-    pub fn update(&mut self, message: Message, now: Instant) {
-        match message {
-            Message::Tab(tab) => {
-                self.tab = tab.min(TABS.len() - 1);
-                self.query.clear();
-            }
-            Message::Search(query) => self.query = query,
-            Message::Toggle(index, value) => {
-                if let Some(setting) = self.switches.get_mut(index) {
-                    setting.set(value, now);
-                }
-            }
-            Message::Language(value) => self.language = value,
-            Message::Region(value) => self.region = value,
-            Message::Date(value) => self.date = value,
-            Message::Reset => {
-                for (toggle, value) in self
-                    .switches
-                    .iter_mut()
-                    .zip([false, true, true, false, false])
-                {
-                    toggle.set(value, now);
-                }
-                let mut defaults = Self::default();
-                std::mem::swap(&mut defaults.switches, &mut self.switches);
-                *self = defaults;
-            }
-            Message::Notice(value) => self.notice = value,
-        }
-    }
-}
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod tests;
 
 fn dispatch(message: Message) -> AppMessage {
     AppMessage::Settings(message)
@@ -286,12 +273,38 @@ pub fn view(app: &Launcher, cards: f32) -> Element<'_, AppMessage> {
                 } else if state.tab == 5 {
                     "外观配置保存在本机，保存后立即应用。"
                 } else {
-                    state.notice
+                    &state.notice
                 },
                 10.
             )
             .color(MUTED),
             body,
+            if state.tab == 0 {
+                row![
+                    button(label("撤销常规更改", 12.))
+                        .style(theme::quiet)
+                        .padding(10)
+                        .on_press_maybe((!state.busy).then_some(dispatch(Message::Revert))),
+                    button(label("退出启动器", 12.))
+                        .style(theme::quiet)
+                        .padding(10)
+                        .on_press(AppMessage::Quit),
+                    Space::new().width(Fill),
+                    button(label(
+                        if state.busy {
+                            "正在处理…"
+                        } else {
+                            "保存常规设置"
+                        },
+                        12.
+                    ))
+                    .style(theme::action)
+                    .padding(10)
+                    .on_press_maybe((!state.busy).then_some(dispatch(Message::Save))),
+                ]
+            } else {
+                row![]
+            },
         ]
         .spacing(12)
         .height(Fill),
@@ -390,10 +403,10 @@ fn panel<'a>(
 
 fn behavior(state: &State, now: Instant) -> Element<'_, AppMessage> {
     let titles = [
-        ("开机自动启动", "随系统启动时自动运行启动器"),
-        ("启动后最小化到托盘", "启动器启动后自动最小化到托盘"),
-        ("启动时自动检查更新", "启动器启动时检查新版本"),
-        ("关闭时最小化到托盘", "点击关闭按钮时最小化而非退出"),
+        ("游戏启动后最小化", "游戏进程启动成功后最小化启动器"),
+        ("启动器启动后最小化", "启动器加载完成后最小化到任务栏"),
+        ("启动时自动检查更新", "连接 GitHub 检查项目发布记录"),
+        ("关闭时最小化到任务栏", "点击关闭或 Alt+F4 时保留任务栏入口"),
     ];
     let mut rows = column![].spacing(13);
     for (index, (title, detail)) in titles.into_iter().enumerate() {
@@ -417,28 +430,48 @@ fn behavior(state: &State, now: Instant) -> Element<'_, AppMessage> {
 fn locale(state: &State) -> Element<'_, AppMessage> {
     column![
         label("界面语言", 11.).color(MUTED),
-        pick_list(LANGUAGES, Some(state.language), |v| dispatch(
-            Message::Language(v)
+        label("简体中文；其他语言尚待接入。", 11.),
+        label("地区与下载源", 11.).color(MUTED),
+        button(label("前往下载安装设置", 11.))
+            .style(theme::quiet)
+            .on_press(dispatch(Message::Tab(2))),
+        label("日期与时间格式", 11.).color(MUTED),
+        pick_list(DATES, Some(DATES[state.draft.date_format]), |v| dispatch(
+            Message::Date(v)
         ))
         .text_size(11)
         .width(Fill),
-        label("地区设置", 11.).color(MUTED),
-        pick_list(REGIONS, Some(state.region), |v| dispatch(Message::Region(
-            v
-        )))
-        .text_size(11)
-        .width(Fill),
-        label("日期与时间格式", 11.).color(MUTED),
-        pick_list(DATES, Some(state.date), |v| dispatch(Message::Date(v)))
-            .text_size(11)
-            .width(Fill),
-        label("部分内容可能仍使用原始语言。", 10.).color(MUTED),
+        label("保存后用于主页最近打开时间（UTC）。", 10.).color(MUTED),
     ]
     .spacing(7)
     .into()
 }
 
 fn account(app: &Launcher) -> Element<'_, AppMessage> {
+    if app.settings.confirm_cache {
+        return column![
+            bold("清理启动器缓存", 13.),
+            label(
+                "将启动器 cache 文件夹移至数据目录下的 recovered-cache，可手动恢复。",
+                11.
+            )
+            .color(MUTED),
+            label("游戏、日志、配置和安装备份保留。", 11.).color(MUTED),
+            row![
+                button(label("确认移动缓存", 11.))
+                    .style(theme::action)
+                    .padding(8)
+                    .on_press(dispatch(Message::ConfirmCache)),
+                button(label("取消", 11.))
+                    .style(theme::quiet)
+                    .padding(8)
+                    .on_press(dispatch(Message::CancelCache)),
+            ]
+            .spacing(8),
+        ]
+        .spacing(12)
+        .into();
+    }
     column![
         label("当前账户", 10.).color(MUTED),
         row![
@@ -461,24 +494,17 @@ fn account(app: &Launcher) -> Element<'_, AppMessage> {
             .style(theme::quiet)
             .on_press(AppMessage::LoginSettings),
         action(
-            Icon::Download,
-            "备份与恢复",
-            "备份游戏、设置、下载记录等",
-            Message::Notice("备份与恢复尚未接入。"),
-            false
-        ),
-        action(
             Icon::Folder,
             "打开数据文件夹",
             "打开启动器的存储目录",
-            Message::Notice("持久化数据目录尚未接入。"),
+            Message::OpenData,
             false
         ),
         action(
             Icon::Close,
             "清理缓存",
-            "清理临时文件和缓存数据",
-            Message::Notice("缓存管理尚未接入，未执行文件删除。"),
+            "将启动器 cache 目录移至恢复目录",
+            Message::ClearCache,
             true
         ),
     ]
@@ -489,18 +515,24 @@ fn account(app: &Launcher) -> Element<'_, AppMessage> {
 fn updates(state: &State, now: Instant) -> Element<'_, AppMessage> {
     column![
         row![
-            label("当前版本   v0.1.0", 12.),
+            label(concat!("当前版本   v", env!("CARGO_PKG_VERSION")), 12.),
             Space::new().width(Fill),
-            label("未检查更新", 10.).color(MUTED),
         ]
         .align_y(Alignment::Center),
         button(label("检查更新", 12.))
             .padding(10)
             .width(Fill)
             .style(theme::quiet)
-            .on_press(dispatch(Message::Notice(
-                "更新服务尚未接入，无法确认是否为最新版本。"
-            ))),
+            .on_press_maybe(
+                (!state.checking && !state.busy).then_some(dispatch(Message::CheckUpdate))
+            ),
+        label(&state.update_notice, 10.).color(MUTED),
+        button(label("打开新版本发布页", 11.))
+            .style(theme::quiet)
+            .on_press_maybe(
+                (state.available.is_some() && !state.busy)
+                    .then_some(dispatch(Message::OpenRelease))
+            ),
         row![
             column![
                 bold("启用测试版更新", 12.),
@@ -555,16 +587,16 @@ fn quick_actions() -> Element<'static, AppMessage> {
         row![
             action(
                 Icon::Download,
-                "导出启动器设置",
-                "备份当前设置到文件",
-                Message::Notice("设置导出尚未接入，未写入文件。"),
+                "导出常规设置",
+                "仅导出已保存的开关和日期格式",
+                Message::Export,
                 false
             ),
             action(
                 Icon::Folder,
-                "导入启动器设置",
-                "从文件恢复设置",
-                Message::Notice("设置导入尚未接入。"),
+                "导入常规设置",
+                "载入 JSON 草稿，核对后保存",
+                Message::Import,
                 false
             ),
         ]
@@ -573,16 +605,16 @@ fn quick_actions() -> Element<'static, AppMessage> {
             action(
                 Icon::Edit,
                 "恢复默认设置",
-                "恢复本次会话的默认值",
+                "恢复常规设置草稿，保存后生效",
                 Message::Reset,
                 false
             ),
             action(
-                Icon::Close,
-                "完全重置",
-                "清除所有数据（不可恢复）",
-                Message::Notice("完全重置尚未接入，未执行任何删除。"),
-                true
+                Icon::Folder,
+                "查看备份目录",
+                "在数据目录查看 recovered-cache",
+                Message::OpenData,
+                false
             ),
         ]
         .spacing(10),
