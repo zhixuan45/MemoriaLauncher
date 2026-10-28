@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use transaction::{apply, prepare, PlanPreview};
+pub use transaction::{list_local_plans, review_local_plan, apply_local_plan, cancel_local_plan, LocalPlan, LocalReview};
 pub type Result<T> = std::result::Result<T, WriteError>;
 #[derive(Debug, Clone, Serialize)]
 pub struct WriteError {

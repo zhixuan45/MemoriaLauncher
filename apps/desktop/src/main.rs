@@ -38,6 +38,7 @@ mod resources;
 mod runtime_memory;
 mod settings;
 mod selections;
+mod change_plans;
 mod shell;
 mod sidebar;
 mod theme;

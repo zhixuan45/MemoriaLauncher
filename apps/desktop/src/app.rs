@@ -94,6 +94,8 @@ pub enum Message {
     LoaderInstall(crate::loader_install::Message),
     OpenDiagnostics,
     Diagnostics(crate::diagnostics::Message),
+    OpenPlans,
+    ChangePlans(crate::change_plans::Message),
     GameStarted(String),
     GameFinished(Result<crate::local::GameExit, String>),
     AnalyzeCrash,
@@ -171,6 +173,7 @@ pub struct Launcher {
     pub resource_install: crate::resource_install::State,
     pub loader_install: crate::loader_install::State,
     pub diagnostics: crate::diagnostics::State,
+    pub change_plans: crate::change_plans::State,
     pub verification: verification::Verification,
 }
 
@@ -184,6 +187,7 @@ pub enum Modal {
     ResourceInstall,
     LoaderInstall,
     Diagnostics,
+    ChangePlans,
 }
 
 impl Launcher {
@@ -238,6 +242,7 @@ impl Launcher {
             resource_install: Default::default(),
             loader_install: Default::default(),
             diagnostics: Default::default(),
+            change_plans: Default::default(),
             verification: verification::Verification::from_args(),
         };
         let task = Task::batch([state.load(), state.accounts.load().map(Message::Accounts)]);
@@ -264,11 +269,25 @@ impl Launcher {
     pub fn theme(&self) -> iced::Theme { self.appearance.theme() }
     pub fn scale_factor(&self) -> f32 { self.appearance.saved.scale as f32 / 100. }
     pub fn instance_writing(&self) -> bool {
-        self.instance_settings.busy || self.resource_install.busy || self.loader_install.installing
+        self.instance_settings.busy || self.resource_install.busy || self.loader_install.installing || self.change_plans.busy
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::OpenPlans => {
+                if self.instance_writing() || self.launching || self.loading || self.environment_saving || self.download.installing.is_some() {return Task::none();}
+                if let Some(instance)=self.page_instance() {
+                    let key=instance.instance.id.clone();
+                    let task=self.change_plans.open(self.environment.game_root.clone(),key).map(Message::ChangePlans);
+                    self.open_modal(Modal::ChangePlans);return task;
+                }
+            }
+            Message::ChangePlans(message) => {
+                let refresh=matches!(&message,crate::change_plans::Message::Done(g,Ok(_)) if *g==self.change_plans.generation);
+                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||self.resource_install.busy||self.loader_install.installing||!crate::local::same_root(&self.change_plans.root,&self.environment.game_root);
+                let task=self.change_plans.update(message,blocked).map(Message::ChangePlans);
+                if refresh {return Task::batch([task,self.load()]);}return task;
+            }
             Message::OpenLoader => {
                 if self.instance_writing()
                     || self.launching

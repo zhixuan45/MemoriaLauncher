@@ -33,7 +33,7 @@ Mod、资源包、光影分别部署到实例内的 `mods/`、`resourcepacks/`�
 
 远程单文件最多 64 MiB、单次计划合计最多 1 GiB；Mod JAR 同时受结构检查的 32 MiB 上限限制。整合包覆盖文件仅允许游戏内容目录（如 `config/`、`mods/`、`resourcepacks/`、`kubejs/` 等），拒绝目录穿越、链接和启动器元数据路径。
 
-全部文件先下载暂存并校验 SHA-1，源站提供 SHA-512 时同时校验。提交前复查目标文件、全部启用依赖 JAR 内容和父版本元数据链；发生变化则要求重新预览。替换保留备份，普通提交失败回滚；若外部程序同时修改文件，保留备份并显示需要手动恢复的路径。
+全部文件先下载暂存并校验 SHA-1，源站提供 SHA-512 时同时校验。提交前复查目标文件、全部启用依赖 JAR 内容和父版本元数据链；发生变化则要求重新预览。替换通过公共文件事务保留备份，普通失败及程序中断后尝试回滚；若检测到外部修改则保留现场并阻止新的协作写入。可通过“管理实例 → 变更计划与恢复”查看事务或重试，详见[计划与恢复](plans-and-recovery.md)。
 
 新增实例数据布局：
 
@@ -44,9 +44,12 @@ Mod、资源包、光影分别部署到实例内的 `mods/`、`resourcepacks/`�
     removed-mods/
     resource-install.json
     resource-installs/<操作 ID>/
-      plan.json            # 文件路径与编号备份的对应关系
+      plan.json            # 文件路径与公共事务备份位置
       stage/
-      backup/
+    transactions/<操作 ID>/
+      journal.json
+      before/
+      after/
     mcp/write.lock         # 与 MCP 写入共用实例锁
 ```
 

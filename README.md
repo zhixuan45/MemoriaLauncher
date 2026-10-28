@@ -34,9 +34,10 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | 第三方资源安装 | 选择版本和目标实例、预览必需依赖与文件、确认安装、校验下载、备份与失败回滚；整合包要求已安装匹配游戏和加载器 |
 | 工作区 | 主页启动选择与 AI 项目分别持久化；每个项目右端可启动，Mod 安装默认最近启动实例 |
 | AI 对话 | 条形输入框、多对话切换、连续追问；加号添加实例日志上下文、图片、文本/配置及 PDF |
+| 计划与恢复 | 实例内审阅/批准/取消已保存计划；GUI 资源与 MCP 共用文件事务，程序中断后自动尝试回滚，外部修改保留现场 |
 | MCP 服务 | AI 设置中配置内置 stdio 服务，选择读取/写入权限和授权实例；服务端执行并动态重读权限 |
 
-**尚未完成：** 完整运行期兼容性模拟、AI 自动组包与汉化、跨文件崩溃自动恢复、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。实例管理、外观及资源安装用法见[功能说明](docs/instance-management.md)。加载器支持范围见[说明](docs/loaders-and-diagnostics.md)；规则格式、依赖求解和保留边界见[规则与求解说明](docs/dependency-resolution-and-rules.md)。
+**尚未完成：** 完整运行期兼容性模拟、AI 自动组包与汉化、全部安装流程的事务覆盖、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。实例管理、外观及资源安装用法见[功能说明](docs/instance-management.md)。加载器支持范围见[说明](docs/loaders-and-diagnostics.md)；规则格式与依赖求解见[说明](docs/dependency-resolution-and-rules.md)，逐计划审批和程序中断恢复见[计划与恢复](docs/plans-and-recovery.md)。
 
 ## 本地运行
 

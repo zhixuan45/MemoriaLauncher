@@ -21,6 +21,7 @@ pub struct GameProcess {
     log_path: PathBuf,
     pumps: Vec<JoinHandle<std::io::Result<()>>>,
     logger: JoinHandle<std::io::Result<()>>,
+    _instance_lock: Option<std::fs::File>,
 }
 
 impl GameProcess {
@@ -80,6 +81,8 @@ pub(crate) async fn spawn(plan: LaunchPlan) -> LauncherResult<GameProcess> {
         )),
     )?;
     let native_path = plan.natives_directory.clone();
+    let instance_lock = crate::service::instance_write::files::lock(&plan.game_directory)
+        .map_err(|e| LauncherError::InvalidMetadata(e.to_string()))?;
     let archives = plan.natives;
     tokio::task::spawn_blocking(move || super::natives::extract(&archives, &native_path))
         .await
@@ -122,6 +125,7 @@ pub(crate) async fn spawn(plan: LaunchPlan) -> LauncherResult<GameProcess> {
     let a = tokio::spawn(pump(stdout, sender.clone(), plan.secrets.clone()));
     let b = tokio::spawn(pump(stderr, sender, plan.secrets));
     Ok(GameProcess {
+        _instance_lock: Some(instance_lock),
         child,
         log_path: plan.log_path,
         pumps: vec![a, b],
@@ -216,11 +220,13 @@ mod tests {
             })
             .await
             .unwrap();
+            assert!(crate::service::instance_write::files::lock(&directory).is_err());
             let exit = tokio::time::timeout(std::time::Duration::from_secs(10), process.wait())
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(exit.code, Some(code));
+            assert!(crate::service::instance_write::files::lock(&directory).is_ok());
             assert_eq!(exit.success, code == 0);
             assert!(exit.log_error.is_none());
             let text = tokio::fs::read_to_string(log_path).await.unwrap();
@@ -241,6 +247,7 @@ mod tests {
         #[cfg(not(windows))]
         let child = Command::new("sh").args(["-c", "exit 9"]).spawn().unwrap();
         let process = GameProcess {
+            _instance_lock: None,
             child,
             log_path: "fixture.log".into(),
             pumps: vec![],

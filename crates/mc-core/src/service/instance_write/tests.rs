@@ -63,6 +63,52 @@ fn config(value: bool) -> Change {
         content: json!({"enabled":value}).to_string(),
     }
 }
+#[tokio::test]
+async fn desktop_review_applies_only_the_exact_local_plan_without_granting_mcp_permissions() {
+    let f=Fixture::new();
+    let preview=prepare(&f.policy,"versions/pack",&config(true)).await.unwrap();
+    let listed=list_local_plans(&f.root,"versions/pack").unwrap();
+    assert_eq!(listed.len(),1);assert_eq!(listed[0].state,"pending");
+    let review=review_local_plan(&f.root,"versions/pack",&preview.plan_id).unwrap();
+    assert_eq!(review.preview.plan_hash,preview.plan_hash);
+    assert!(review.preview.files[0]["text_preview"].as_str().unwrap().contains("true"));
+    assert!(!f.base.join("config/demo.json").exists());
+    let mut denied=f.policy.clone();denied.permissions.write_configs=false;
+    assert_eq!(apply(&denied,"versions/pack",&preview.plan_id,&preview.plan_hash).unwrap_err().code,"PERMISSION_DENIED");
+    assert_eq!(apply_local_plan(&f.root,"versions/pack",&preview.plan_id,"bad hash").unwrap_err().code,"PLAN_HASH_MISMATCH");
+    apply_local_plan(&f.root,"versions/pack",&preview.plan_id,&preview.plan_hash).unwrap();
+    assert!(!denied.permissions.write_configs);
+    assert_eq!(apply(&denied,"versions/pack",&preview.plan_id,&preview.plan_hash).unwrap_err().code,"PERMISSION_DENIED");
+    assert_eq!(list_local_plans(&f.root,"versions/pack").unwrap()[0].state,"applied");
+    assert_eq!(crate::service::file_transaction::history(&f.root,"versions/pack").unwrap()[0].state,"committed");
+}
+#[tokio::test]
+async fn cancelled_stale_and_changed_plans_cannot_be_approved() {
+    let f=Fixture::new();
+    let preview=prepare(&f.policy,"versions/pack",&config(true)).await.unwrap();
+    cancel_local_plan(&f.root,"versions/pack",&preview.plan_id,&preview.plan_hash).unwrap();
+    assert_eq!(apply(&f.policy,"versions/pack",&preview.plan_id,&preview.plan_hash).unwrap_err().code,"PLAN_CANCELLED");
+    assert!(!f.base.join("config/demo.json").exists());
+    let preview=prepare(&f.policy,"versions/pack",&config(true)).await.unwrap();
+    std::fs::create_dir_all(f.base.join("config")).unwrap();
+    std::fs::write(f.base.join("config/demo.json"),b"external").unwrap();
+    assert_eq!(review_local_plan(&f.root,"versions/pack",&preview.plan_id).unwrap().plan.state,"stale");
+    assert_eq!(apply_local_plan(&f.root,"versions/pack",&preview.plan_id,&preview.plan_hash).unwrap_err().code,"PLAN_STALE");
+    assert_eq!(std::fs::read(f.base.join("config/demo.json")).unwrap(),b"external");
+}
+#[tokio::test]
+async fn a_committed_transaction_without_a_mcp_receipt_is_never_applied_again() {
+    let f=Fixture::new();
+    let preview=prepare(&f.policy,"versions/pack",&config(true)).await.unwrap();
+    let base=f.base.clone();
+    let operations=[crate::service::file_transaction::Operation {path:"config/demo.json".into(),old_sha256:None,staged:Some(format!(".launcher/mcp/plans/{}/0.bin",preview.plan_id))}];
+    {
+        let _lock=files::lock(&base).unwrap();
+        crate::service::file_transaction::execute_locked(&base,&preview.plan_id,"mcp_instance_write",&operations).unwrap();
+    }
+    assert_eq!(apply(&f.policy,"versions/pack",&preview.plan_id,&preview.plan_hash).unwrap()["status"],"already_applied");
+    assert_eq!(crate::service::file_transaction::history(&f.root,"versions/pack").unwrap().len(),1);
+}
 fn entry(id: &str) -> ftb::QuestEntry {
     serde_json::from_value(json!({"id":id,"title":"开始冒险","description":["收集原木"],"icon":"minecraft:oak_log","completion":[{"type":"item","item":"minecraft:oak_log","count":16}],"rewards":[{"type":"item","item":"minecraft:apple","count":4}],"position":{"x":0.14,"y":0}})).unwrap()
 }

@@ -233,6 +233,11 @@ pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     file.sync_all().map_err(io_error)
 }
 pub fn lock(base: &Path) -> Result<fs::File> {
+    let file=lock_raw(base)?;
+    crate::service::file_transaction::recover_locked(base)?;
+    Ok(file)
+}
+pub(crate) fn lock_raw(base: &Path) -> Result<fs::File> {
     create_dirs(base, ".memoria/mcp")?;
     let path = safe_join(base, ".memoria/mcp/write.lock")?;
     let file = fs::OpenOptions::new()

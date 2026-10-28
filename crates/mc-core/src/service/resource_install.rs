@@ -651,10 +651,10 @@ pub async fn install(
     for watch in &preview.watches {
         watch.check(&base).map_err(error)?;
     }
-    let run = format!(".memoria/resource-installs/{}", uuid::Uuid::new_v4());
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let run = format!(".memoria/resource-installs/{operation_id}");
     files::create_dirs(&base, &format!("{run}/stage")).map_err(error)?;
-    files::create_dirs(&base, &format!("{run}/backup")).map_err(error)?;
-    let journal = json!({"instance":preview.request.instance,"title":preview.title,"files":preview.files.iter().enumerate().map(|(index,file)|json!({"path":file.path,"remove":file.remove,"backup":format!("backup/{index}")})).collect::<Vec<_>>()});
+    let journal = json!({"journal_version":2,"transaction":operation_id,"instance":preview.request.instance,"title":preview.title,"files":preview.files.iter().enumerate().map(|(index,file)|json!({"path":file.path,"remove":file.remove,"backup":format!(".memoria/transactions/{operation_id}/before/{index}")})).collect::<Vec<_>>()});
     files::write_new(
         &files::safe_join(&base, &format!("{run}/plan.json")).map_err(error)?,
         &serde_json::to_vec_pretty(&journal).map_err(error)?,
@@ -703,77 +703,36 @@ pub async fn install(
     {
         return Err("实例环境已变化，请重新预览".into());
     }
-    let mut committed: Vec<(PathBuf, Option<PathBuf>, Option<String>)> = Vec::new();
-    let result = (|| -> Result<()> {
-        for (index, entry) in preview.files.iter().enumerate() {
-            #[cfg(test)]
-            if preview.fail_commit_at == Some(index) {
-                return Err("fixture commit failure".into());
-            }
-            if let Some(watch) = preview
+    let operations = preview
+        .files
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let watch = preview
                 .watches
                 .iter()
-                .find(|v| !v.directory && v.path == entry.path)
-            {
-                watch.check(&base).map_err(error)?;
-            }
-            let path = files::safe_join(&base, &entry.path).map_err(error)?;
-            if let Some(parent) = std::path::Path::new(&entry.path)
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-            {
-                files::create_dirs(&base, &parent.to_string_lossy()).map_err(error)?;
-            }
-            let backup = if path.exists() {
-                let backup =
-                    files::safe_join(&base, &format!("{run}/backup/{index}")).map_err(error)?;
-                fs::rename(&path, &backup).map_err(error)?;
-                Some(backup)
-            } else {
-                None
-            };
-            committed.push((path.clone(), backup, None));
-            if !entry.remove {
-                let stage =
-                    files::safe_join(&base, &format!("{run}/stage/{index}")).map_err(error)?;
-                fs::hard_link(&stage, &path).map_err(error)?;
-                committed.last_mut().unwrap().2 = files::file_hash(&path).map_err(error)?;
-                fs::remove_file(stage).map_err(error)?;
-            }
-        }
-        Ok(())
-    })();
-    if let Err(e) = result {
-        let mut failures = vec![];
-        for (path, backup, hash) in committed.into_iter().rev() {
-            if let Some(expected) = hash {
-                if files::file_hash(&path).map_err(error)?.as_deref() != Some(&expected) {
-                    failures.push(path.display().to_string());
-                    continue;
-                }
-                if let Err(e) = fs::remove_file(&path) {
-                    failures.push(error(e));
-                    continue;
-                }
-            }
-            if let Some(backup) = backup {
-                if path.exists() {
-                    failures.push(path.display().to_string());
-                } else if let Err(e) = fs::rename(backup, path) {
-                    failures.push(error(e));
-                }
-            }
-        }
-        return Err(format!(
-            "{e}；已回滚可恢复文件。备份：{}{}",
-            base.join(&run).display(),
-            if failures.is_empty() {
-                String::new()
-            } else {
-                format!("；需手动恢复：{}", failures.join("、"))
-            }
-        ));
-    }
+                .find(|watch| !watch.directory && watch.path == entry.path)
+                .ok_or_else(|| format!("缺少文件快照：{}", entry.path))?;
+            Ok(super::file_transaction::Operation {
+                path: entry.path.clone(),
+                old_sha256: watch.hash.clone(),
+                staged: (!entry.remove).then(|| format!("{run}/stage/{index}")),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let id = run.rsplit('/').next().unwrap();
+    #[cfg(test)]
+    super::file_transaction::execute_with(
+        &base,
+        id,
+        "desktop_resource_install",
+        &operations,
+        preview.fail_commit_at,
+    )
+    .map_err(error)?;
+    #[cfg(not(test))]
+    super::file_transaction::execute_locked(&base, id, "desktop_resource_install", &operations)
+        .map_err(error)?;
     progress(Progress {
         done: preview.files.len(),
         total: preview.files.len(),
@@ -782,6 +741,7 @@ pub async fn install(
     Ok(format!(
         "{} 安装完成；备份：{}",
         preview.title,
-        base.join(run).display()
+        base.join(format!(".memoria/transactions/{id}/before"))
+            .display()
     ))
 }

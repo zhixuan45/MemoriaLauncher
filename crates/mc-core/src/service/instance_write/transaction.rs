@@ -34,7 +34,7 @@ struct PlannedFile {
     size: usize,
     stage: String,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PlanPreview {
     pub plan_id: String,
     pub plan_hash: String,
@@ -44,6 +44,12 @@ pub struct PlanPreview {
     pub warnings: Vec<String>,
     pub details: Value,
 }
+#[path = "review.rs"]
+mod review;
+pub use review::{
+    apply_local_plan, cancel_local_plan, list_local_plans, review_local_plan, LocalPlan,
+    LocalReview,
+};
 pub fn decode(data: &str, limit: usize) -> Result<Vec<u8>> {
     if data.len() > limit.div_ceil(3) * 4 {
         return Err(invalid("Base64 文件超过大小限制"));
@@ -278,6 +284,9 @@ pub fn apply(policy: &McpPolicy, instance: &str, id: &str, hash: &str) -> Result
     }
     let plan: Plan = serde_json::from_slice(&bytes).map_err(invalid)?;
     authorize(policy, instance, plan.kind)?;
+    if files::safe_join(&base, &format!("{relative}/cancelled.json"))?.exists() {
+        return Err(error("PLAN_CANCELLED", "此计划已由用户取消，请重新生成"));
+    }
     if plan.version != 1
         || plan.id != id
         || plan.instance != instance
@@ -297,7 +306,7 @@ pub fn apply(policy: &McpPolicy, instance: &str, id: &str, hash: &str) -> Result
         files::basename(&file.stage, ".bin")?;
     }
     let receipt = files::safe_join(&base, &format!("{relative}/applied.json"))?;
-    if receipt.exists() {
+    if receipt.exists() || crate::service::file_transaction::committed(&base, id)? {
         for file in &plan.files {
             if files::file_hash(&files::safe_join(&base, &file.path)?)?.as_deref()
                 != Some(&file.sha256)
@@ -315,6 +324,9 @@ pub fn apply(policy: &McpPolicy, instance: &str, id: &str, hash: &str) -> Result
         return Err(error("PLAN_EXPIRED", "计划已过期，请重新预览"));
     }
     if files::safe_join(&base, &format!("{relative}/applying.json"))?.exists() {
+        if crate::service::file_transaction::rolled_back(&base, id)? {
+            return Err(error("PLAN_STALE", "中断事务已回滚，请重新生成预览"));
+        }
         return Err(error(
             "RECOVERY_REQUIRED",
             "上次应用中断，请检查备份后重新生成计划",
@@ -323,7 +335,6 @@ pub fn apply(policy: &McpPolicy, instance: &str, id: &str, hash: &str) -> Result
     for watch in &plan.watches {
         watch.check(&base)?;
     }
-    let mut data = vec![];
     for file in &plan.files {
         let path = files::safe_join(&base, &file.path)?;
         if files::file_hash(&path)? != file.old_sha256 {
@@ -339,7 +350,6 @@ pub fn apply(policy: &McpPolicy, instance: &str, id: &str, hash: &str) -> Result
         if bytes.len() != file.size || digest(&bytes) != file.sha256 {
             return Err(error("PLAN_HASH_MISMATCH", "暂存文件已损坏或被更改"));
         }
-        data.push(bytes);
     }
     let backup = format!(".launcher/mcp/backups/{id}");
     for file in &plan.files {
@@ -361,43 +371,16 @@ pub fn apply(policy: &McpPolicy, instance: &str, id: &str, hash: &str) -> Result
         )
         .map_err(invalid)?,
     )?;
-    let mut changed = vec![];
-    let result = (|| -> Result<()> {
-        for (file, bytes) in plan.files.iter().zip(&data) {
-            // Last check immediately before replacing each file; the lock serializes Memoria writers.
-            if files::file_hash(&files::safe_join(&base, &file.path)?)? != file.old_sha256 {
-                return Err(error("PLAN_STALE", "应用时检测到并发修改"));
-            }
-            replace(&base, &file.path, bytes)?;
-            changed.push(file);
-        }
-        Ok(())
-    })();
-    if let Err(cause) = result {
-        let mut failures = vec![];
-        for file in changed.iter().rev() {
-            let rollback = if file.old_sha256.is_some() {
-                files::read_bounded(
-                    &files::safe_join(&base, &format!("{backup}/{}", file.path))?,
-                    64 * 1024 * 1024,
-                )
-                .and_then(|bytes| replace(&base, &file.path, &bytes))
-            } else {
-                files::safe_join(&base, &file.path)
-                    .and_then(|p| fs::remove_file(p).map_err(io_error))
-            };
-            if let Err(e) = rollback {
-                failures.push(e.to_string());
-            }
-        }
-        return Err(error(
-            "APPLY_FAILED",
-            format!(
-                "{cause}；已回滚可恢复文件；备份：{backup}；回滚错误：{}",
-                failures.join("; ")
-            ),
-        ));
-    }
+    let operations = plan
+        .files
+        .iter()
+        .map(|file| crate::service::file_transaction::Operation {
+            path: file.path.clone(),
+            old_sha256: file.old_sha256.clone(),
+            staged: Some(format!("{relative}/{}", file.stage)),
+        })
+        .collect::<Vec<_>>();
+    crate::service::file_transaction::execute_locked(&base, id, "mcp_instance_write", &operations)?;
     let report = json!({"plan_id":id,"plan_hash":hash,"status":"applied","backup_directory":backup,"files":plan.files.iter().map(|f|json!({"path":f.path,"sha256":f.sha256})).collect::<Vec<_>>(),"applied_at":chrono::Utc::now()});
     files::write_new(
         &receipt,
@@ -431,6 +414,9 @@ fn reserve_cache(base: &Path, incoming: usize) -> Result<()> {
         let relative = plan_path(&id)?;
         let path = files::safe_join(base, &relative)?;
         let applied = files::safe_join(base, &format!("{relative}/applied.json"))?.exists();
+        let finished = crate::service::file_transaction::rolled_back(base, &id)?
+            || crate::service::file_transaction::committed(base, &id)?;
+        let cancelled = files::safe_join(base, &format!("{relative}/cancelled.json"))?.exists();
         let applying = files::safe_join(base, &format!("{relative}/applying.json"))?.exists();
         let old = entry
             .metadata()
@@ -439,7 +425,7 @@ fn reserve_cache(base: &Path, incoming: usize) -> Result<()> {
             .map_err(io_error)?
             .elapsed()
             .is_ok_and(|age| age.as_secs() > 1800);
-        let clear = applied || (old && !applying);
+        let clear = applied || cancelled || finished || (old && !applying);
         let mut children = vec![];
         for child in fs::read_dir(&path).map_err(io_error)? {
             let child = child.map_err(io_error)?;
@@ -462,7 +448,7 @@ fn reserve_cache(base: &Path, incoming: usize) -> Result<()> {
                 bytes = bytes.saturating_add(*size);
             }
         }
-        if !applied && !(old && !applying) {
+        if !applied && !cancelled && !finished && !(old && !applying) {
             pending += 1;
         }
         if old
@@ -490,17 +476,6 @@ fn reserve_cache(base: &Path, incoming: usize) -> Result<()> {
 fn ensure_parent(base: &Path, path: &str) -> Result<()> {
     if let Some((parent, _)) = path.rsplit_once('/') {
         files::create_dirs(base, parent)?;
-    }
-    Ok(())
-}
-fn replace(base: &Path, path: &str, bytes: &[u8]) -> Result<()> {
-    ensure_parent(base, path)?;
-    let target = files::safe_join(base, path)?;
-    let temporary = target.with_extension(format!("{}.mcp-tmp", uuid::Uuid::new_v4()));
-    files::write_new(&temporary, bytes)?;
-    if let Err(e) = fs::rename(&temporary, &target) {
-        let _ = fs::remove_file(&temporary);
-        return Err(io_error(e));
     }
     Ok(())
 }

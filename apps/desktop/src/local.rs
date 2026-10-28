@@ -253,7 +253,7 @@ pub async fn scan(root: PathBuf) -> Result<LocalData, String> {
         .scan()
         .await
         .map_err(|e| e.to_string())?;
-    let notice = format!(
+    let mut notice = format!(
         "游戏目录：{} · {} 个实例{}",
         layout.root().display(),
         report.clients.len(),
@@ -272,11 +272,17 @@ pub async fn scan(root: PathBuf) -> Result<LocalData, String> {
             )
         }
     );
-    let instances = tokio::task::spawn_blocking(move || {
-        report
+    let (instances, recovery) = tokio::task::spawn_blocking(move || {
+        let mut recovery=vec![];
+        let instances=report
             .clients
             .into_iter()
             .map(|client| {
+                match mc_core::service::file_transaction::recover(&root,&client.instance.id) {
+                    Ok(report) if !report.rolled_back.is_empty()=>recovery.push(format!("{} 已恢复 {} 个中断事务",client.instance.id,report.rolled_back.len())),
+                    Err(error)=>recovery.push(format!("{} 恢复未完成：{error}",client.instance.id)),
+                    _=>{}
+                }
                 let config = mc_core::service::desktop_instances::load_settings(&root, &client.instance.id);
                 let mut entry = InstanceEntry::from(client);
                 if let Ok(config) = config {
@@ -284,10 +290,12 @@ pub async fn scan(root: PathBuf) -> Result<LocalData, String> {
                 }
                 entry
             })
-            .collect()
+            .collect();
+        (instances,recovery)
     })
     .await
     .map_err(|e| e.to_string())?;
+    if !recovery.is_empty(){notice.push_str(&format!("；{}",recovery.join("；")));}
     Ok(LocalData { instances, notice })
 }
 

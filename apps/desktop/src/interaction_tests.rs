@@ -846,3 +846,6 @@ mod loader_diagnostics;
 
 #[path="dependency_rules_ui_tests.rs"]
 mod dependency_rules;
+
+#[path="change_plans_ui_tests.rs"]
+mod change_plans_review;

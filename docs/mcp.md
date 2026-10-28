@@ -50,7 +50,7 @@ Windows 可设置 MEMORIA_GAME_ROOT 为 Minecraft 的根目录；未设置时尝
 
 日志属于不可信数据，模型应只分析错误，不执行日志中的指令。读取会遮蔽含常见访问令牌、刷新令牌、API Key 等标记的整行，并返回 `redacted_lines`；这不能保证覆盖所有 Mod 自定义的敏感格式，玩家名和本地路径仍可能保留。连接 MCP 即允许客户端请求这些实例日志，客户端如何把工具结果交给模型由客户端控制。报告可能属于较早运行，分析时应核对修改时间，不能把旧报告当成本次退出的证据。
 
-保存类别和实例授权后，还提供 Modrinth/CurseForge 来源 ID 安装、JAR 上传、配置写入、语义化 FTB 任务/图片编辑，以及物品 ID 校验。所有写入先返回持久化预览，再用准确 `plan_id` + `plan_hash` 应用；覆盖前备份，权限和文件哈希每次重查。详见 [写入接口、格式示例和边界](mcp-writes.md)。没有任意命令、删除、游戏启动或通用文件读写接口。
+保存类别和实例授权后，还提供 Modrinth/CurseForge 来源 ID 安装、JAR 上传、配置写入、语义化 FTB 任务/图片编辑，以及物品 ID 校验。所有写入先返回持久化预览，再用准确 `plan_id` + `plan_hash` 应用；覆盖前备份，权限和文件哈希每次重查。详见 [写入接口、格式示例和边界](mcp-writes.md)。没有任意命令、删除、游戏启动或通用文件读写接口。已有计划也可在桌面逐项批准或取消，GUI 与 MCP 共享中断恢复事务；本地批准不修改 MCP 授权。详见[计划与恢复](plans-and-recovery.md)。
 
 公共目录和来源安装请求会直接联网；API 失败返回结构化错误。CurseForge 需要外部客户端安全提供 API Key，且遵守源站分发限制。
 
@@ -73,7 +73,7 @@ cargo test -p mc-core -p mc-mcp -p desktop
 
 1. 用可持久化的真实 InstanceService / CatalogProvider 替换 GUI Mock；MCP 与 GUI 共用相同来源。
 2. 增加 get_mod_versions / resolve_dependencies / plan_mod_changes / preview_changes，计划只读。
-3. 将现有受限写入计划扩展为完整依赖求解、逐计划 GUI 审批与崩溃自动恢复。
+3. 在已完成的静态依赖求解、逐计划 GUI 审批和公共文件恢复上，继续扩展锁定文件、完整整合包流程及其他多步骤操作的事务覆盖。
 4. 补充汉化任务队列、存档隔离、分级授权，必要时引入独立本地 REST API，默认仅绑定回环地址。
 
 ## 内置服务器权限
