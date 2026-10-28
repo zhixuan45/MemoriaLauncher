@@ -2,6 +2,28 @@ use super::*;
 use crate::{ai, workspace};
 
 #[tokio::test]
+async fn ai_project_controls_keep_home_selection_and_target_the_ai_project() {
+    for size in [Size::new(1024., 680.), Size::new(1536., 921.)] {
+        let mut app=populated().await;
+        let home=app.active.clone();
+        let selected=app.instances.iter().find(|i|i.instance.id!=home).unwrap().instance.id.clone();
+        for instance in &mut app.instances {instance.installed=true;}
+        let _=app.update(Message::Workspace(workspace::Message::OpenProject(selected.clone())));
+        assert_eq!(app.active,home);
+        app.viewport=size;
+        let _=app.update(Message::Animate(app.animation_time+crate::motion::PAGE_DURATION));
+        let launches=click(&mut app,"启动实例");
+        assert!(launches.iter().any(|message|matches!(message,Message::LaunchInstance(_,id) if id==&selected)));
+        for message in click(&mut app,"管理实例") {let _=app.update(message);}
+        assert_eq!(app.instance_settings.instance,selected);
+        assert_eq!(app.active,home);
+        let _=app.update(Message::Dismiss);
+        let _=app.update(Message::Navigate(Page::Home));
+        assert_eq!(app.current().unwrap().instance.id,home);
+    }
+}
+
+#[tokio::test]
 async fn project_launch_buttons_target_their_own_instance_and_disable_during_a_game() {
     let mut app = populated().await;
     app.accounts.busy = false;

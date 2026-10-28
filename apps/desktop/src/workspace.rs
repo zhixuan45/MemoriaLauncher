@@ -150,14 +150,20 @@ pub fn project(app: &Launcher, id: &str) -> Option<Project> {
 pub fn update(app: &mut Launcher, message: Message) -> Task<AppMessage> {
     match message {
         Message::NewChat => {
-            let context = project(app, &app.active);
+            let context = app
+                .workspace
+                .current
+                .project
+                .as_ref()
+                .filter(|p| crate::local::same_root(&p.root, &app.environment.game_root))
+                .and_then(|p| project(app, &p.instance_id))
+                .or_else(|| project(app, &app.active));
             app.workspace.new_chat(&mut app.ai, context);
         }
         Message::OpenProject(id) => {
             let Some(context) = project(app, &id) else {
                 return Task::none();
             };
-            app.active = id;
             let existing = app
                 .workspace
                 .conversations()
@@ -175,13 +181,6 @@ pub fn update(app: &mut Launcher, message: Message) -> Task<AppMessage> {
         }
         Message::OpenChat(id) => {
             app.workspace.open(&mut app.ai, id);
-            if let Some(context) = &app.workspace.current.project {
-                if project(app, &context.instance_id).is_some()
-                    && crate::local::same_root(&context.root, &app.environment.game_root)
-                {
-                    app.active = context.instance_id.clone();
-                }
-            }
         }
         Message::ToggleProject(id) => {
             let key = (app.environment.game_root.clone(), id);
@@ -212,6 +211,7 @@ pub fn update(app: &mut Launcher, message: Message) -> Task<AppMessage> {
             return app.update(AppMessage::Navigate(Page::Settings));
         }
     }
+    crate::selections::remember(app);
     Task::batch([
         app.update(AppMessage::Navigate(Page::Ai)),
         iced::widget::operation::focus("ai-prompt"),

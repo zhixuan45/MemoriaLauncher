@@ -100,10 +100,7 @@ fn workspace_toolbar(app: &Launcher) -> Element<'_, Message> {
         controls=controls.push(button(label("安装加载器",11.)).padding(8).style(theme::quiet)
             .on_press_maybe((!app.instance_writing()&&!app.launching).then_some(Message::OpenLoader)));
     }
-    let target = if app.page == Page::Ai {
-        app.workspace.current.project.as_ref().filter(|p| p.matches(&app.environment.game_root, &app.active))
-            .and_then(|p| app.instances.iter().find(|i| i.instance.id == p.instance_id))
-    } else { app.current() };
+    let target = app.page_instance();
     if let Some(instance) = target {
         controls=controls.push(button(label("管理实例",11.)).padding(8).style(theme::quiet).on_press_maybe((!app.instance_writing()).then_some(Message::EditInstance)));
         controls = controls.push(button(row![icon(Icon::Play, GREEN, 13.), label("启动实例", 11.)].spacing(7).align_y(Alignment::Center))
@@ -168,7 +165,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
         }
         Modal::Diagnostics => content=content.push(crate::diagnostics::view(&app.diagnostics)),
         Modal::ResourceInstall => {
-            content=content.push(crate::resource_install::view(&app.resource_install,app.launching||app.instance_settings.busy||app.download.installing.is_some()||!crate::local::same_root(&app.resource_install.root,&app.environment.game_root)));
+            content=content.push(crate::resource_install::view(&app.resource_install,app.launching||app.instance_settings.busy||app.download.installing.is_some()||!app.environment.game_roots.iter().chain(std::iter::once(&app.environment.game_root)).any(|root|crate::local::same_root(root,&app.resource_install.root))));
         }
         Modal::Changelog => {
             content = content.push(label("当前开发版本已实现的功能。", 12.).color(MUTED));

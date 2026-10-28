@@ -163,6 +163,7 @@ pub struct Launcher {
     pub download: crate::download::State,
     pub ai: crate::ai::State,
     pub workspace: crate::workspace::State,
+    pub selections: crate::selections::State,
     pub ai_settings: crate::ai_settings::State,
     pub mcp_settings: crate::mcp_settings::State,
     pub instance_settings: crate::instance_settings::State,
@@ -229,6 +230,7 @@ impl Launcher {
             download,
             ai,
             workspace: crate::workspace::State::default(),
+            selections: crate::selections::State::load(),
             ai_settings,
             mcp_settings,
             instance_settings: Default::default(),
@@ -251,6 +253,13 @@ impl Launcher {
 
     pub fn current(&self) -> Option<&InstanceEntry> {
         self.instances.iter().find(|i| i.instance.id == self.active)
+    }
+    pub fn page_instance(&self) -> Option<&InstanceEntry> {
+        if self.page == Page::Ai {
+            self.workspace.current.project.as_ref()
+                .filter(|p|crate::local::same_root(&p.root,&self.environment.game_root))
+                .and_then(|p|self.instances.iter().find(|i|i.instance.id==p.instance_id))
+        } else {self.current()}
     }
     pub fn theme(&self) -> iced::Theme { self.appearance.theme() }
     pub fn scale_factor(&self) -> f32 { self.appearance.saved.scale as f32 / 100. }
@@ -297,7 +306,7 @@ impl Launcher {
             }
             Message::OpenDiagnostics => {
                 self.open_modal(Modal::Diagnostics);
-                let instance = self.current().map(|entry| entry.instance.id.clone()).unwrap_or_default();
+                let instance = self.page_instance().map(|entry| entry.instance.id.clone()).unwrap_or_default();
                 return self.diagnostics.open(
                     self.environment.game_root.clone(), instance, None, None,
                 ).map(Message::Diagnostics);
@@ -313,7 +322,7 @@ impl Launcher {
             }
             Message::ResourceInstall(message) => {
                 let refresh=matches!(&message,crate::resource_install::Message::Finished(g,Ok(_)) if *g==self.resource_install.generation);
-                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||self.loader_install.installing||!crate::local::same_root(&self.resource_install.root,&self.environment.game_root);
+                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||self.loader_install.installing||!self.environment.game_roots.iter().chain(std::iter::once(&self.environment.game_root)).any(|root|crate::local::same_root(root,&self.resource_install.root));
                 let task=self.resource_install.update(message,self.download.client.clone(),blocked).map(Message::ResourceInstall);
                 self.status=self.resource_install.notice.clone();
                 if refresh && crate::local::same_root(&self.resource_install.root,&self.environment.game_root){return Task::batch([task,self.load()]);}
@@ -334,14 +343,9 @@ impl Launcher {
                 match result {
                     Ok(data) => {
                         let instances = data.instances;
-                        if !instances.iter().any(|i| i.instance.id == self.active) {
-                            self.active = instances
-                                .first()
-                                .map(|i| i.instance.id.clone())
-                                .unwrap_or_default();
-                        }
                         self.instances = instances;
                         self.status = data.notice;
+                        crate::selections::restore(self);
                     }
                     Err(e) => self.status = format!("读取失败：{e}"),
                 }
@@ -377,6 +381,7 @@ impl Launcher {
             Message::SelectInstance(id) => {
                 if self.instances.iter().any(|i| i.instance.id == id) {
                     self.active = id;
+                    crate::selections::remember(self);
                 }
             }
             Message::Workspace(message) => return crate::workspace::update(self, message),
@@ -400,6 +405,7 @@ impl Launcher {
                     return Task::none();
                 }
                 self.active = id;
+                crate::selections::remember(self);
                 return self.update(Message::Launch);
             }
             Message::MoveInstance(id, delta) => {
@@ -430,6 +436,9 @@ impl Launcher {
                         return Task::none();
                     }
                 };
+                if let Err(error) = self.selections.launched(&self.environment.game_root, &key) {
+                    self.selections.notice = Some(format!("启动选择保存失败：{error}"));
+                }
                 if self.accounts.busy {
                     self.status = "请等待账户操作完成。".into();
                     return Task::none();
@@ -494,6 +503,7 @@ impl Launcher {
                         let context = crate::workspace::project(self, &crash.instance_id)
                             .filter(|p| crate::local::same_root(&p.root, &crash.game_root));
                         self.workspace.new_chat(&mut self.ai, context);
+                        crate::selections::remember(self);
                         let navigation = self.update(Message::Navigate(Page::Ai));
                         let analysis = crate::workspace::update_ai(
                             self,
@@ -531,9 +541,11 @@ impl Launcher {
                 self.environment_saving = self.game_settings.busy;
                 if let Some(config) = saved {
                     if !crate::local::same_root(&self.environment.game_root, &config.game_root) {
+                        crate::selections::remember(self);
                         // Version IDs are only unique within one collection.
                         self.active.clear();
                         self.instances.clear();
+                        self.selections.restore_pending = true;
                     }
                     self.environment = config;
                     self.loading = true;
@@ -563,7 +575,7 @@ impl Launcher {
             }
             Message::EditInstance => {
                 if self.instance_writing() {return Task::none();}
-                if let Some(instance)=self.current(){
+                if let Some(instance)=self.page_instance(){
                     let key=instance.instance.id.clone();
                     let task=self.instance_settings.open(self.environment.game_root.clone(),key).map(Message::InstanceSettings);
                     self.open_modal(Modal::Instance); return task;
@@ -652,12 +664,16 @@ impl Launcher {
             Message::Minimize => return window::latest().and_then(|id| window::minimize(id, true)),
             Message::Maximize => return window::latest().and_then(window::toggle_maximize),
             Message::Close => {
+                crate::selections::remember(self);
                 if self.settings.saved.minimize_on_close {
                     return window::latest().and_then(|id| window::minimize(id, true));
                 }
                 return iced::exit();
             }
-            Message::Quit => return iced::exit(),
+            Message::Quit => {
+                crate::selections::remember(self);
+                return iced::exit();
+            }
             Message::Profile => self.open_modal(Modal::Profile),
             Message::LoginSettings => {
                 let _ = self.settings.update(
@@ -698,7 +714,10 @@ impl Launcher {
                     if self.instance_writing()||self.launching||self.loading||self.environment_saving||self.download.installing.is_some(){self.status="请等待当前实例操作完成。".into();return Task::none();}
                     if let Some((kind,project,version,selection))=self.download.resources.install_selection(id){
                         self.resource_install.open(self.environment.game_root.clone(),&self.instances,&self.active,kind,project,version,selection);
+                        let preferred = self.selections.last_launched().filter(|p| self.environment.game_roots.iter().chain(std::iter::once(&self.environment.game_root)).any(|root|crate::local::same_root(root,&p.root))).cloned();
+                        let task = if kind==mc_core::ResourceKind::Mod {self.resource_install.restore_default(preferred)} else {Task::none()};
                         self.open_modal(Modal::ResourceInstall);
+                        return task.map(Message::ResourceInstall);
                     }
                     return Task::none();
                 }

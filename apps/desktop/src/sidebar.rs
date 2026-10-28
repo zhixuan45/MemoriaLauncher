@@ -122,7 +122,10 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
     for instance in &app.instances {
         let id = &instance.instance.id;
         let expanded = app.workspace.expanded(&app.environment.game_root, id);
-        let selected = app.active == *id;
+        let selected = if app.page == Page::Ai {
+            app.workspace.current.project.as_ref()
+                .is_some_and(|p|p.matches(&app.environment.game_root,id))
+        } else { app.active == *id };
         let title = instance.instance.name.chars().take(17).collect::<String>();
         let select = button(
             row![

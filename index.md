@@ -229,7 +229,7 @@ modules:
       - file: "apps/desktop/src/dashboard.rs"
         desc: "默认主页、当前实例与三项统计、项目/对话列表、下载状态"
       - file: "apps/desktop/src/workspace.rs"
-        desc: "实例集+实例ID项目身份、多对话草稿隔离、在途回复按会话ID路由"
+        desc: "实例集+实例ID项目身份、AI/主页选择分离、草稿隔离与按会话ID路由"
       - file: "apps/desktop/src/chat_view.rs"
         desc: "条形开屏输入框、会话消息、加号菜单与模型入口"
       - file: "apps/desktop/src/attachments.rs"
@@ -238,6 +238,12 @@ modules:
         desc: "加号菜单、附件移除/预览与日志上下文预览"
       - file: "apps/desktop/src/mcp_settings.rs"
         desc: "AI 设置中的内置 MCP 读写权限、实例白名单、实际物品表导入与格式示例复制"
+      - file: "apps/desktop/src/selections.rs"
+        desc: "主页/AI 按实例集独立记忆、最近启动身份、限量原子保存与扫描后恢复"
+      - file: "apps/desktop/src/selections_tests.rs"
+        desc: "磁盘重启、同名集合隔离、最近启动安装目标、缺失回退及扫描前关闭保护"
+      - file: "apps/desktop/src/resource_install.rs"
+        desc: "资源安装向导、固定目标、最近启动默认选择与跨集合目标读取"
       - file: "apps/desktop/src/workspace_tests.rs"
         desc: "项目对话隔离、草稿保留与过期回复路由测试"
       - file: "apps/desktop/src/workspace_ui_tests.rs"
@@ -299,6 +305,8 @@ modules:
 
 # 核心业务调用链速查 (单行文本链式表达，严禁画流程图)
 workflows:
+  - name: "selection_persistence_flow"
+    chain: "selections.json -> 当前实例集扫描后验证并恢复主页/AI选择 -> 选择变更和退出原子保存 -> 独立最近启动身份用于 Mod 默认目标；跨集合按路径校验"
   - name: "loader_install_flow"
     chain: "OpenLoader -> 原版基础实例/版本选择 -> Catalog.preview 固定 profile/哈希 -> GUI 确认 -> loaders.install 暂存校验 -> 新独立 profile 发布 -> 本地扫描刷新"
   - name: "local_log_analysis_flow"

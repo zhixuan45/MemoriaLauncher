@@ -18,6 +18,7 @@ use std::path::PathBuf;
 pub struct Target {
     pub id: String,
     pub label: String,
+    pub root: PathBuf,
 }
 impl std::fmt::Display for Target {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -26,6 +27,11 @@ impl std::fmt::Display for Target {
 }
 #[derive(Debug, Clone)]
 pub enum Message {
+    LastTargetLoaded(
+        u64,
+        crate::selections::Reference,
+        Result<crate::local::LocalData, String>,
+    ),
     Target(Target),
     Optional(bool),
     Prepare,
@@ -63,6 +69,7 @@ impl State {
             .iter()
             .map(|i| Target {
                 id: i.instance.id.clone(),
+                root: root.clone(),
                 label: format!(
                     "{} · {} · {}",
                     i.instance.name, i.instance.mc_version, i.loader
@@ -93,6 +100,44 @@ impl State {
             ..Default::default()
         };
     }
+    pub fn restore_default(
+        &mut self,
+        preferred: Option<crate::selections::Reference>,
+    ) -> Task<Message> {
+        let Some(preferred) = preferred else {
+            return Task::none();
+        };
+        if crate::local::same_root(&preferred.root, &self.root) {
+            self.select_remembered(&preferred);
+            return Task::none();
+        }
+        self.busy = true;
+        self.notice = "正在读取上次启动实例所在的实例集…".into();
+        let generation = self.generation;
+        Task::perform(crate::local::scan(preferred.root.clone()), move |result| {
+            Message::LastTargetLoaded(generation, preferred.clone(), result)
+        })
+    }
+    fn select_remembered(&mut self, preferred: &crate::selections::Reference) {
+        if let Some(target) = self
+            .targets
+            .iter()
+            .find(|t| {
+                t.id == preferred.instance_id && crate::local::same_root(&t.root, &preferred.root)
+            })
+            .cloned()
+        {
+            self.root = target.root.clone();
+            if let Some(request) = &mut self.request {
+                request.root = target.root.clone();
+                request.instance = target.id.clone();
+            }
+            self.target = Some(target);
+            self.notice = "默认选择上次启动的实例；请核对目标后生成预览。".into();
+        } else {
+            self.notice = "上次启动的实例已不存在，已回退到主页选择；请核对目标实例。".into();
+        }
+    }
     pub fn update(
         &mut self,
         message: Message,
@@ -100,6 +145,30 @@ impl State {
         blocked: bool,
     ) -> Task<Message> {
         match message {
+            Message::LastTargetLoaded(g, preferred, result) if g == self.generation => {
+                self.busy = false;
+                match result {
+                    Ok(data) => {
+                        self.targets
+                            .extend(data.instances.iter().map(|instance| Target {
+                                id: instance.instance.id.clone(),
+                                root: preferred.root.clone(),
+                                label: format!(
+                                    "{} · {} · {} · {}",
+                                    instance.instance.name,
+                                    instance.instance.mc_version,
+                                    instance.loader,
+                                    preferred.root.display()
+                                ),
+                            }));
+                        self.select_remembered(&preferred);
+                    }
+                    Err(error) => {
+                        self.notice = format!("无法读取上次启动实例，保留主页目标：{error}")
+                    }
+                }
+            }
+            Message::LastTargetLoaded(..) => {}
             Message::Prepared(generation, result) if generation == self.generation => {
                 self.busy = false;
                 match result {
@@ -127,7 +196,9 @@ impl State {
                 if self.targets.contains(&target) {
                     if let Some(request) = &mut self.request {
                         request.instance = target.id.clone();
+                        request.root = target.root.clone();
                     }
+                    self.root = target.root.clone();
                     self.target = Some(target);
                     self.preview = None;
                     self.progress = None;

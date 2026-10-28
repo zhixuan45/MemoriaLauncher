@@ -37,6 +37,7 @@ mod motion_renderer;
 mod resources;
 mod runtime_memory;
 mod settings;
+mod selections;
 mod shell;
 mod sidebar;
 mod theme;
