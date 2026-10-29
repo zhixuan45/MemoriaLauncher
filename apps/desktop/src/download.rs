@@ -20,6 +20,7 @@ const TABS: [&str; 4] = ["版本介绍", "版本文件", "配置要求", "相关
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    NewInstance,
     Category(usize),
     Resources(crate::resources::Message),
     Search(String),
@@ -154,6 +155,7 @@ impl State {
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::NewInstance=>{},
             Message::Resources(message) => {
                 return self.resources.update(message).map(Message::Resources)
             }
@@ -448,7 +450,7 @@ pub fn view(state: &State, cards: f32) -> Element<'_, Message> {
         crate::resources::view(&state.resources).map(Message::Resources)
     };
     let mut content = column![
-        row![icon(Icon::Download, GREEN, 24.), bold("游戏下载", 26.)]
+        row![icon(Icon::Download, GREEN, 24.), bold("游戏下载", 26.),iced::widget::Space::new().width(Fill),button(label("新建实例 / 导入整合包",12.)).padding(10).style(theme::quiet).on_press(Message::NewInstance)]
             .spacing(12)
             .align_y(Alignment::Center),
         label("选择版本、Mod 或整合包，快速开始你的冒险", 14.).color(MUTED),

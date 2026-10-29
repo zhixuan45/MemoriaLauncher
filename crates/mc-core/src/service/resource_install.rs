@@ -20,6 +20,9 @@ const MANIFEST: &str = ".memoria/resource-install.json";
 const LIMIT: usize = 64 * 1024 * 1024;
 #[path = "resource_dependencies.rs"]
 mod dependencies;
+#[path="resource_pack.rs"]
+mod pack;
+pub use pack::{prepare_pack,fetch_pack};
 #[derive(Debug, Clone)]
 pub struct Request {
     pub root: PathBuf,
@@ -38,11 +41,11 @@ pub struct InstallFile {
     pub path: String,
     pub size: u64,
     pub source: String,
-    urls: Vec<String>,
-    sha1: String,
-    sha512: Option<String>,
-    inline: Option<Vec<u8>>,
-    remove: bool,
+    pub(crate) urls: Vec<String>,
+    pub(crate) sha1: String,
+    pub(crate) sha512: Option<String>,
+    pub(crate) inline: Option<Vec<u8>>,
+    pub(crate) remove: bool,
 }
 #[derive(Debug, Clone)]
 pub struct Preview {
@@ -64,6 +67,7 @@ pub struct Progress {
     pub message: String,
 }
 pub type ProgressCallback = Arc<dyn Fn(Progress) + Send + Sync>;
+fn mod_file(path:&str)->bool {let path=path.to_ascii_lowercase();path.starts_with("mods/") && (path.ends_with(".jar")||path.ends_with(".jar.disabled"))}
 fn identifier(v: &str) -> Result<()> {
     if v.is_empty()
         || v.len() > 100
@@ -150,7 +154,7 @@ fn file(v: &Value, path: String, source: String) -> Result<InstallFile> {
             })
             .collect::<Result<Vec<_>>>()?
     };
-    if urls.is_empty() {
+    if urls.is_empty() || urls.len()>8 || urls.iter().any(|url|url.len()>2048) {
         return Err("缺少下载地址".into());
     }
     for url in &urls {
@@ -174,7 +178,7 @@ fn file(v: &Value, path: String, source: String) -> Result<InstallFile> {
         remove: false,
     })
 }
-fn check_url(value: &str) -> Result<()> {
+pub(crate) fn check_url(value: &str) -> Result<()> {
     let url = url::Url::parse(value).map_err(error)?;
     let host = url.host_str().unwrap_or_default();
     let fixture = cfg!(test) && host == "127.0.0.1" && url.scheme() == "http";
@@ -253,6 +257,7 @@ async fn prepare_with(
     let environment_digest =
         super::mod_resolver::inventory::environment_digest(&request.root, &request.instance)?;
     let mut watches = vec![
+        files::Watch::file(&base, super::packs::lockfile::LOCK_PATH).map_err(error)?,
         files::Watch::file(&base, MANIFEST).map_err(error)?,
         files::Watch::directory(&base, "mods").map_err(error)?,
     ];
@@ -360,6 +365,7 @@ async fn prepare_with(
             let bytes = download(&client, &descriptor).await?;
             let (pack_files, pack_warnings) =
                 unpack(&bytes, game, loader, loader_version, request.optional)?;
+            for file in &pack_files {records.retain(|r|r["path"]!=file.path);records.push(json!({"path":file.path,"downloads":file.urls,"sha1":file.sha1,"sha512":file.sha512}));}
             output.extend(pack_files);
             warnings.extend(pack_warnings);
         } else {
@@ -394,7 +400,8 @@ async fn prepare_with(
                 }
             }
             records.retain(|r| r["project"] != project);
-            records.push(json!({"project":project,"version":version,"path":descriptor.path}));
+            records.retain(|record|record["path"]!=descriptor.path);
+            records.push(json!({"project":project,"version":version,"path":descriptor.path,"downloads":descriptor.urls,"sha1":descriptor.sha1,"sha512":descriptor.sha512}));
             output.push(descriptor);
         }
         if let Some(deps) = metadata["dependencies"]
@@ -515,7 +522,7 @@ async fn prepare_with(
     })
 }
 
-fn unpack(
+pub(crate) fn unpack(
     bytes: &[u8],
     game: &str,
     loader: &str,
@@ -554,7 +561,10 @@ fn unpack(
             "neoforge" => "neoforge",
             _ => return Err(format!("未知整合包运行依赖：{name}")),
         };
-        if expected != loader || version.as_str() != Some(loader_version) {
+        let actual=loader_version.strip_prefix(&format!("{game}-")).unwrap_or(loader_version);
+        let requested=version.as_str().unwrap_or("");
+        let requested=requested.strip_prefix(&format!("{game}-")).unwrap_or(requested);
+        if expected != loader || requested != actual {
             return Err(format!(
                 "请先安装并选择 Minecraft {game} / {expected} {version} 实例"
             ));
@@ -563,6 +573,8 @@ fn unpack(
     let mut output = BTreeMap::new();
     let mut warnings = vec![];
     for entry in index["files"].as_array().ok_or("整合包文件清单缺失")? {
+        allowed_path(string(entry,"path")?)?;
+        if entry.get("env").is_some_and(|env|!env.is_null()&&!env.is_object()) || entry["env"].get("client").is_some_and(|client|!matches!(client.as_str(),Some("required"|"optional"|"unsupported"))) {return Err("整合包客户端环境声明无效".into());}
         if entry["env"]["client"] == "unsupported" {
             continue;
         }
@@ -628,9 +640,11 @@ fn unpack(
             );
         }
     }
-    if output.len() > 4096 {
-        return Err("整合包文件超过 4096".into());
+    if output.len() > 4094 {
+        return Err("整合包内容超过 4094 项，需为来源和锁定记录预留事务项".into());
     }
+    let mut unique=std::collections::HashSet::new();
+    if output.keys().any(|path|!unique.insert(path.to_ascii_lowercase())) {return Err("整合包含大小写冲突的重复文件路径".into());}
     Ok((output.into_values().collect(), warnings))
 }
 
@@ -678,7 +692,7 @@ pub async fn install(
             continue;
         }
         let mut bytes = download(&client, entry).await?;
-        if entry.path.starts_with("mods/") {
+        if mod_file(&entry.path) {
             super::instance_write::validate_jar(&bytes).map_err(error)?;
         }
         if entry.path == MANIFEST {
@@ -687,6 +701,8 @@ pub async fn install(
             for record in records {
                 if record["path"] == entry.path {
                     record["sha256"] = json!(digest(&bytes));
+                    record["sha1"] = json!(format!("{:x}",Sha1::digest(&bytes)));
+                    record["sha512"] = json!(format!("{:x}",Sha512::digest(&bytes)));
                 }
             }
         }
@@ -703,7 +719,11 @@ pub async fn install(
     {
         return Err("实例环境已变化，请重新预览".into());
     }
-    let operations = preview
+    let replacements=preview.files.iter().enumerate().map(|(index,file)|super::packs::lockfile::Replacement {path:file.path.clone(),staged:(!file.remove).then(||format!("{run}/stage/{index}"))}).collect::<Vec<_>>();
+    let lock=super::packs::lockfile::capture_with(&preview.request.root,&preview.request.instance,true,&replacements).await?;
+    let lock_stage=format!("{run}/stage/lock.json");
+    files::write_new(&files::safe_join(&base,&lock_stage).map_err(error)?,&serde_json::to_vec_pretty(&lock).map_err(error)?).map_err(error)?;
+    let mut operations = preview
         .files
         .iter()
         .enumerate()
@@ -720,6 +740,8 @@ pub async fn install(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let lock_watch=preview.watches.iter().find(|w|w.path==super::packs::lockfile::LOCK_PATH).ok_or("缺少锁定文件快照")?;
+    operations.push(super::file_transaction::Operation {path:super::packs::lockfile::LOCK_PATH.into(),old_sha256:lock_watch.hash.clone(),staged:Some(lock_stage)});
     let id = run.rsplit('/').next().unwrap();
     #[cfg(test)]
     super::file_transaction::execute_with(

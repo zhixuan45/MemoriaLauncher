@@ -13,7 +13,7 @@ pub async fn install(
     let base = files::instance_dir(&plan.root, &plan.base).map_err(invalid)?;
     let _collection_lock = files::lock(&plan.root).map_err(invalid)?;
     let _base_lock = files::lock(&base).map_err(invalid)?;
-    if base_snapshot(&layout, &plan.base)? != plan.snapshot {
+    if Some(base_snapshot(&layout, &plan.base)?) != plan.snapshot {
         return Err(LauncherError::PlanStale);
     }
     let mut java = JavaRuntime::inspect(java).await?;
@@ -147,7 +147,7 @@ async fn install_staged(
         work.parent().unwrap().join("manifest.json"),
         serde_json::to_vec_pretty(&manifest)?,
     )?;
-    if base_snapshot(layout, &plan.base)? != plan.snapshot {
+    if Some(base_snapshot(layout, &plan.base)?) != plan.snapshot {
         return Err(LauncherError::PlanStale);
     }
     for (path, hash) in &manifest {
@@ -167,7 +167,7 @@ async fn install_staged(
             publish_file(&source, &destination)?;
         }
     }
-    if base_snapshot(layout, &plan.base)? != plan.snapshot {
+    if Some(base_snapshot(layout, &plan.base)?) != plan.snapshot {
         return Err(LauncherError::PlanStale);
     }
     let destination =

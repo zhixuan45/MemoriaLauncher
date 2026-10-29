@@ -21,6 +21,7 @@ sysinfo = { version = "0.39.6", default-features = false, features = ["system"] 
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "query", "rustls-no-provider"] }
 
 [dev-dependencies]
+sha1 = "0.10"
 iced_test = "0.14"
 zip = { version = "6", default-features = false, features = ["deflate"] }
 

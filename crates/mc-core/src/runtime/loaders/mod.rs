@@ -73,6 +73,14 @@ pub struct Catalog {
     neoforge: String,
 }
 impl Catalog {
+    #[cfg(test)]
+    pub(crate) fn fixture_base(mut self, base: &str) -> Self {
+        self.fabric = format!("{base}/fabric");
+        self.quilt = format!("{base}/quilt");
+        self.forge = format!("{base}/forge");
+        self.neoforge = format!("{base}/neo");
+        self
+    }
     pub fn new(client: DownloadClient) -> Self {
         Self {
             client,
@@ -187,7 +195,7 @@ impl Catalog {
         {
             return Err(invalid("同名加载器实例已存在，不会覆盖。"));
         }
-        let mut plan = Plan {
+        let plan = Plan {
             root,
             minecraft,
             base,
@@ -197,11 +205,53 @@ impl Catalog {
             files: vec![],
             profile: None,
             installer: None,
-            snapshot,
+            snapshot: Some(snapshot),
             required_java: resolved.metadata.java_version.map(|v| v.major_version),
         };
-        if kind.requires_installer() {
-            let (base, group, artifact) = self.maven(kind);
+        self.complete_preview(plan).await
+    }
+    /// Pin a loader for a new, staged vanilla installation. Public install still requires binding its base.
+    pub(crate) async fn preview_new(
+        &self,
+        root: PathBuf,
+        minecraft: String,
+        kind: Kind,
+        version: String,
+        target: String,
+        required_java: Option<u32>,
+    ) -> LauncherResult<Plan> {
+        component(&minecraft)?;
+        component(&version)?;
+        component(&target)?;
+        if target == minecraft {
+            return Err(invalid("新实例名称不能与基础版本相同"));
+        }
+        if !self
+            .versions(kind, &minecraft)
+            .await?
+            .iter()
+            .any(|v| v.version == version)
+        {
+            return Err(invalid("加载器版本不支持所选 Minecraft"));
+        }
+        let plan = Plan {
+            root,
+            minecraft: minecraft.clone(),
+            base: format!("versions/{minecraft}"),
+            kind,
+            version,
+            target,
+            files: vec![],
+            profile: None,
+            installer: None,
+            snapshot: None,
+            required_java,
+        };
+        self.complete_preview(plan).await
+    }
+    async fn complete_preview(&self, mut plan: Plan) -> LauncherResult<Plan> {
+        if plan.kind.requires_installer() {
+            let (base, group, artifact) = self.maven(plan.kind);
             let url = format!(
                 "{base}/{group}/{artifact}/{}/{}-{}-installer.jar",
                 plan.version, artifact, plan.version
@@ -223,7 +273,7 @@ impl Catalog {
                 size: Some(bytes.len() as u64),
             });
         } else {
-            let base = if kind == Kind::Fabric {
+            let base = if plan.kind == Kind::Fabric {
                 &self.fabric
             } else {
                 &self.quilt
@@ -266,9 +316,13 @@ pub struct Plan {
     required_java: Option<u32>,
     installer: Option<DownloadFile>,
     profile: Option<Value>,
-    snapshot: BaseSnapshot,
+    snapshot: Option<BaseSnapshot>,
 }
 impl Plan {
+    pub(crate) fn bind_base_snapshot(mut self) -> LauncherResult<Self> {
+        self.snapshot = Some(base_snapshot(&GameLayout::new(&self.root)?, &self.base)?);
+        Ok(self)
+    }
     pub fn target(&self) -> &str {
         &self.target
     }

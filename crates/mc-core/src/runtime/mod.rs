@@ -19,7 +19,7 @@ pub use auth::{
     DevicePollResult, LoginStart, MemoryCredentialStore, MicrosoftAuthConfig,
     MicrosoftAuthProvider, OfflineAuthProvider, StoredCredential, UnavailableAuthProvider,
 };
-pub use install::install_vanilla;
+pub use install::{install_vanilla, preview_vanilla, install_vanilla_plan, VanillaPlan};
 pub use java::JavaRuntime;
 pub use launch::{GameLauncher, LaunchCheck, LaunchOptions, LaunchPlan};
 pub use layout::GameLayout;

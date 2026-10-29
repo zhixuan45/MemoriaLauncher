@@ -849,3 +849,6 @@ mod dependency_rules;
 
 #[path="change_plans_ui_tests.rs"]
 mod change_plans_review;
+
+#[path="pack_ui_tests.rs"]
+mod packs_ui;

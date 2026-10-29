@@ -197,6 +197,47 @@ impl State {
 fn dispatch(message: Message) -> AppMessage {
     AppMessage::ChangePlans(message)
 }
+pub fn open_app(app: &mut crate::app::Launcher) -> Task<AppMessage> {
+    if app.instance_writing()
+        || app.launching
+        || app.loading
+        || app.environment_saving
+        || app.download.installing.is_some()
+    {
+        return Task::none();
+    }
+    if let Some(entry) = app.page_instance() {
+        let key = entry.instance.id.clone();
+        let task = app
+            .change_plans
+            .open(app.environment.game_root.clone(), key)
+            .map(AppMessage::ChangePlans);
+        app.open_modal(crate::app::Modal::ChangePlans);
+        return task;
+    }
+    Task::none()
+}
+pub fn update_app(app: &mut crate::app::Launcher, message: Message) -> Task<AppMessage> {
+    let refresh = matches!(&message,Message::Done(g,Ok(_)) if *g==app.change_plans.generation);
+    let blocked = app.launching
+        || app.loading
+        || app.environment_saving
+        || app.download.installing.is_some()
+        || app.instance_settings.busy
+        || app.resource_install.busy
+        || app.loader_install.installing
+        || app.instance_wizard.installing
+        || app.pack_export.busy
+        || !crate::local::same_root(&app.change_plans.root, &app.environment.game_root);
+    let task = app
+        .change_plans
+        .update(message, blocked)
+        .map(AppMessage::ChangePlans);
+    if refresh {
+        return Task::batch([task, app.update(AppMessage::Refresh)]);
+    }
+    task
+}
 pub fn view(state: &State, blocked: bool) -> Element<'_, AppMessage> {
     let enabled = !state.busy && !blocked;
     let mut body = column![

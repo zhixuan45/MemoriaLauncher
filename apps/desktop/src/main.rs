@@ -39,6 +39,8 @@ mod runtime_memory;
 mod settings;
 mod selections;
 mod change_plans;
+mod instance_wizard;
+mod pack_export;
 mod shell;
 mod sidebar;
 mod theme;

@@ -124,6 +124,8 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 Modal::LoaderInstall => "安装加载器",
                 Modal::Diagnostics => "本地日志诊断",
                 Modal::ChangePlans => "变更计划与恢复",
+                Modal::InstanceWizard => "新建实例与导入整合包",
+                Modal::PackExport => "实例锁定与整合包导出",
             },
             22.
         ),
@@ -165,6 +167,8 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
             content=content.push(crate::loader_install::view(&app.loader_install,app.launching||app.resource_install.busy||app.instance_settings.busy||app.download.installing.is_some()));
         }
         Modal::Diagnostics => content=content.push(crate::diagnostics::view(&app.diagnostics)),
+        Modal::InstanceWizard => content=content.push(crate::instance_wizard::view(&app.instance_wizard,app.launching||app.loading||app.environment_saving||app.download.installing.is_some()||app.resource_install.busy||app.instance_settings.busy||app.loader_install.installing||!crate::local::same_root(&app.instance_wizard.root,&app.environment.game_root))),
+        Modal::PackExport => content=content.push(crate::pack_export::view(&app.pack_export,app.launching||app.loading||app.environment_saving||app.download.installing.is_some()||app.resource_install.busy||app.instance_settings.busy||app.loader_install.installing||app.instance_wizard.installing||!crate::local::same_root(&app.pack_export.root,&app.environment.game_root))),
         Modal::ChangePlans => content=content.push(crate::change_plans::view(&app.change_plans,app.launching||app.instance_settings.busy||app.resource_install.busy||app.loader_install.installing||app.loading||app.environment_saving||app.download.installing.is_some()||!crate::local::same_root(&app.change_plans.root,&app.environment.game_root))),
         Modal::ResourceInstall => {
             content=content.push(crate::resource_install::view(&app.resource_install,app.launching||app.instance_settings.busy||app.download.installing.is_some()||!app.environment.game_roots.iter().chain(std::iter::once(&app.environment.game_root)).any(|root|crate::local::same_root(root,&app.resource_install.root))));
@@ -514,7 +518,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
     }
     let dialog = container(scrollable(content).direction(theme::scroll_direction()))
         .padding(24)
-        .width(if matches!(modal,Modal::Instance|Modal::ResourceInstall|Modal::LoaderInstall|Modal::Diagnostics|Modal::ChangePlans){760}else{580})
+        .width(if matches!(modal,Modal::Instance|Modal::ResourceInstall|Modal::LoaderInstall|Modal::Diagnostics|Modal::ChangePlans|Modal::InstanceWizard|Modal::PackExport){760}else{580})
         .max_height((app.viewport.height-60.).min(640.))
         .style(theme::panel);
     let progress = app.modal_motion.value(app.animation_time);

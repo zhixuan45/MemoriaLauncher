@@ -69,6 +69,7 @@ fn content_path(base: &Path, path: &str) -> Result<()> {
             "options.txt",
             "servers.dat",
             ".memoria/resource-install.json",
+            ".memoria/instance-lock.json",
             ".launcher/mod-list.json",
         ]
         .contains(&path)

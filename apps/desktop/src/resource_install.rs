@@ -289,6 +289,7 @@ pub fn view(state: &State, blocked: bool) -> Element<'_, AppMessage> {
         .as_ref()
         .is_some_and(|v| v.kind == ResourceKind::Modpack)
     {
+        if let Some(request)=&state.request {body=body.push(button(label("新建整合包实例（自动安装游戏与加载器）",12.)).padding(10).style(theme::quiet).on_press_maybe(enabled.then_some(AppMessage::ImportRemotePack(request.project.clone(),request.version.clone()))));}
         body = body.push(
             label(
                 "整合包会部署到所选实例；请使用独立实例，并匹配清单要求的 Minecraft 与加载器版本。",

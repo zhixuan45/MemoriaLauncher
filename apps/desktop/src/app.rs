@@ -96,6 +96,11 @@ pub enum Message {
     Diagnostics(crate::diagnostics::Message),
     OpenPlans,
     ChangePlans(crate::change_plans::Message),
+    OpenInstanceWizard,
+    InstanceWizard(crate::instance_wizard::Message),
+    ImportRemotePack(String,String),
+    OpenPackExport,
+    PackExport(crate::pack_export::Message),
     GameStarted(String),
     GameFinished(Result<crate::local::GameExit, String>),
     AnalyzeCrash,
@@ -174,6 +179,8 @@ pub struct Launcher {
     pub loader_install: crate::loader_install::State,
     pub diagnostics: crate::diagnostics::State,
     pub change_plans: crate::change_plans::State,
+    pub instance_wizard: crate::instance_wizard::State,
+    pub pack_export: crate::pack_export::State,
     pub verification: verification::Verification,
 }
 
@@ -188,6 +195,8 @@ pub enum Modal {
     LoaderInstall,
     Diagnostics,
     ChangePlans,
+    InstanceWizard,
+    PackExport,
 }
 
 impl Launcher {
@@ -243,6 +252,8 @@ impl Launcher {
             loader_install: Default::default(),
             diagnostics: Default::default(),
             change_plans: Default::default(),
+            instance_wizard: Default::default(),
+            pack_export: Default::default(),
             verification: verification::Verification::from_args(),
         };
         let task = Task::batch([state.load(), state.accounts.load().map(Message::Accounts)]);
@@ -269,25 +280,18 @@ impl Launcher {
     pub fn theme(&self) -> iced::Theme { self.appearance.theme() }
     pub fn scale_factor(&self) -> f32 { self.appearance.saved.scale as f32 / 100. }
     pub fn instance_writing(&self) -> bool {
-        self.instance_settings.busy || self.resource_install.busy || self.loader_install.installing || self.change_plans.busy
+        self.instance_settings.busy || self.resource_install.busy || (self.loader_install.installing || self.instance_wizard.installing || self.pack_export.busy) || self.change_plans.busy
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::OpenPlans => {
-                if self.instance_writing() || self.launching || self.loading || self.environment_saving || self.download.installing.is_some() {return Task::none();}
-                if let Some(instance)=self.page_instance() {
-                    let key=instance.instance.id.clone();
-                    let task=self.change_plans.open(self.environment.game_root.clone(),key).map(Message::ChangePlans);
-                    self.open_modal(Modal::ChangePlans);return task;
-                }
-            }
-            Message::ChangePlans(message) => {
-                let refresh=matches!(&message,crate::change_plans::Message::Done(g,Ok(_)) if *g==self.change_plans.generation);
-                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||self.resource_install.busy||self.loader_install.installing||!crate::local::same_root(&self.change_plans.root,&self.environment.game_root);
-                let task=self.change_plans.update(message,blocked).map(Message::ChangePlans);
-                if refresh {return Task::batch([task,self.load()]);}return task;
-            }
+            Message::OpenInstanceWizard=>return crate::instance_wizard::open_app(self),
+            Message::InstanceWizard(message)=>return crate::instance_wizard::update_app(self,message),
+            Message::ImportRemotePack(project,version)=>return crate::instance_wizard::remote_app(self,project,version),
+            Message::OpenPackExport=>return crate::pack_export::open_app(self),
+            Message::PackExport(message)=>return crate::pack_export::update_app(self,message),
+            Message::OpenPlans=>return crate::change_plans::open_app(self),
+            Message::ChangePlans(message)=>return crate::change_plans::update_app(self,message),
             Message::OpenLoader => {
                 if self.instance_writing()
                     || self.launching
@@ -334,14 +338,14 @@ impl Launcher {
             Message::Appearance(message) => return self.appearance.update(message).map(Message::Appearance),
             Message::InstanceSettings(message) => {
                 let refresh=matches!(&message,crate::instance_settings::Message::Completed(g,Ok(_),notice) if *g==self.instance_settings.generation && notice!="实例已读取");
-                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.resource_install.busy||self.loader_install.installing;
+                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.resource_install.busy||(self.loader_install.installing || self.instance_wizard.installing || self.pack_export.busy);
                 let task=if let Some(task)=self.instance_settings.picker(&message){task}else{self.instance_settings.update(message,blocked)}.map(Message::InstanceSettings);
                 if refresh && crate::local::same_root(&self.instance_settings.root,&self.environment.game_root){return Task::batch([task,self.load()]);}
                 return task;
             }
             Message::ResourceInstall(message) => {
                 let refresh=matches!(&message,crate::resource_install::Message::Finished(g,Ok(_)) if *g==self.resource_install.generation);
-                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||self.loader_install.installing||!self.environment.game_roots.iter().chain(std::iter::once(&self.environment.game_root)).any(|root|crate::local::same_root(root,&self.resource_install.root));
+                let blocked=self.launching||self.loading||self.environment_saving||self.download.installing.is_some()||self.instance_settings.busy||(self.loader_install.installing || self.instance_wizard.installing || self.pack_export.busy)||!self.environment.game_roots.iter().chain(std::iter::once(&self.environment.game_root)).any(|root|crate::local::same_root(root,&self.resource_install.root));
                 let task=self.resource_install.update(message,self.download.client.clone(),blocked).map(Message::ResourceInstall);
                 self.status=self.resource_install.notice.clone();
                 if refresh && crate::local::same_root(&self.resource_install.root,&self.environment.game_root){return Task::batch([task,self.load()]);}
@@ -729,6 +733,7 @@ impl Launcher {
                 return task;
             }
             Message::Download(message) => {
+                if matches!(&message,crate::download::Message::NewInstance){return self.update(Message::OpenInstanceWizard);}
                 if let crate::download::Message::Resources(crate::resources::Message::Install(id))=&message {
                     if self.instance_writing()||self.launching||self.loading||self.environment_saving||self.download.installing.is_some(){self.status="请等待当前实例操作完成。".into();return Task::none();}
                     if let Some((kind,project,version,selection))=self.download.resources.install_selection(id){
@@ -851,7 +856,7 @@ impl Launcher {
             || self.settings.animating(self.animation_time)
     }
 
-    fn open_modal(&mut self, modal: Modal) {
+    pub(crate) fn open_modal(&mut self, modal: Modal) {
         let now = Instant::now().max(self.animation_time);
         self.animation_time = now;
         if self.modal != Some(modal) {

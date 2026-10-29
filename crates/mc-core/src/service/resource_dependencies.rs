@@ -157,8 +157,8 @@ pub(super) async fn audit_preview(
         .filter(|file| file.path.starts_with("mods/") && !file.remove)
     {
         let bytes = download(client, file).await?;
-        super::super::instance_write::validate_jar(&bytes).map_err(error)?;
-        inventory.add_jar(&bytes, file.path.strip_prefix("mods/").unwrap(), true);
+        if mod_file(&file.path) {super::super::instance_write::validate_jar(&bytes).map_err(error)?;}
+        if file.path.to_ascii_lowercase().ends_with(".jar") {inventory.add_jar(&bytes, file.path.strip_prefix("mods/").unwrap(), true);}
         file.inline = Some(bytes);
     }
     let report = inventory.audit();

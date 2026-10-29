@@ -10,6 +10,7 @@ pub mod resource_install;
 pub mod mod_resolver;
 pub mod task;
 pub mod file_transaction;
+pub mod packs;
 
 pub use catalog::*;
 pub use instance::*;

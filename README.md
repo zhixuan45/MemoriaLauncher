@@ -24,20 +24,21 @@ An independent Minecraft Java Edition launcher built with Rust and iced. It prov
 | 异常退出检测 | 非正常退出时提示启用 AI 分析；用户确认发送后才上传本次启动日志末尾，可移除附件 |
 | 官方版本目录 | 从 Mojang 官方版本清单读取真实版本、发布时间与元数据地址 |
 | 下载安装 | 下载原版客户端、依赖库、原生库与资源，校验 SHA-1，安装后自动扫描到当前实例集 |
-| 加载器安装 | Fabric/Quilt 官方 profile；现代 Forge/NeoForge 官方安装器；版本查询、预览确认及新建独立实例 |
+| 加载器安装 | Fabric/Quilt 官方 profile；现代 Forge/NeoForge 官方安装器；版本查询、预览确认及独立新实例；新建向导可自动准备原版，无需先安装基础实例 |
 | 本地日志诊断 | 游戏退出后自动解析；19 条内置规则、自定义 JSON 导入、上下文匹配与结构化证据，不自动上传或修复 |
 | 下载设置 | 官方、BMCLAPI 或自定义兼容镜像；支持 1–64 个并行下载，保存后新任务生效，重启保留 |
 | 常规与维护 | 窗口行为和日期格式持久化、常规配置导入导出、数据目录、可恢复缓存移动、项目发布版本检查；详见[说明](docs/general-settings.md) |
 | 本地统计 | 统计实例隔离目录内的 Mod JAR 数量；尚未记录的游玩时长显示“未记录” |
 | 第三方资源目录 | Modrinth 模组、整合包、资源包与光影搜索，支持版本/加载器筛选、分页，以及版本文件和依赖预览 |
 | Mod 依赖求解 | 本地前置/版本/冲突检查、候选 JAR 只读计划；Modrinth 安装回溯选版并校验安装后的 JAR 组合 |
-| 第三方资源安装 | 选择版本和目标实例、预览必需依赖与文件、确认安装、校验下载、备份与失败回滚；整合包要求已安装匹配游戏和加载器 |
+| 第三方资源安装 | 选择版本和目标实例、预览必需依赖与文件、确认安装、校验下载、备份与失败回滚；整合包可部署到匹配实例，或按清单自动新建游戏及加载器实例 |
+| 锁定与整合包 | 内容哈希锁定及漂移校验；标准 mrpack 导入导出，来源引用与本地覆盖文件，提供独立 Core 新实例安装 API |
 | 工作区 | 主页启动选择与 AI 项目分别持久化；每个项目右端可启动，Mod 安装默认最近启动实例 |
 | AI 对话 | 条形输入框、多对话切换、连续追问；加号添加实例日志上下文、图片、文本/配置及 PDF |
 | 计划与恢复 | 实例内审阅/批准/取消已保存计划；GUI 资源与 MCP 共用文件事务，程序中断后自动尝试回滚，外部修改保留现场 |
 | MCP 服务 | AI 设置中配置内置 stdio 服务，选择读取/写入权限和授权实例；服务端执行并动态重读权限 |
 
-**尚未完成：** 完整运行期兼容性模拟、AI 自动组包与汉化、全部安装流程的事务覆盖、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。实例管理、外观及资源安装用法见[功能说明](docs/instance-management.md)。加载器支持范围见[说明](docs/loaders-and-diagnostics.md)；规则格式与依赖求解见[说明](docs/dependency-resolution-and-rules.md)，逐计划审批和程序中断恢复见[计划与恢复](docs/plans-and-recovery.md)。
+**尚未完成：** 完整运行期兼容性模拟、AI 自动组包与汉化、全部安装流程的事务覆盖、非 Windows 系统的安全凭据存储。旧版 virtual/map_to_resources 资源布局会明确报错。实例管理、外观及资源安装用法见[功能说明](docs/instance-management.md)。加载器支持范围见[说明](docs/loaders-and-diagnostics.md)；规则格式与依赖求解见[说明](docs/dependency-resolution-and-rules.md)，逐计划审批和程序中断恢复见[计划与恢复](docs/plans-and-recovery.md)。独立安装入口、Core API 和整合包用法见[新实例与整合包](docs/packs-and-new-instances.md)。
 
 ## 本地运行
 

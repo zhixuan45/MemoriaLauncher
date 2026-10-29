@@ -14,7 +14,7 @@ Fabric/Quilt 使用按 Minecraft 版本过滤的官方 Meta API，验证 profile
 
 记录保留在游戏根目录 `.memoria/loader-installs/<操作 ID>/`，包含 `work/`、`manifest.json`、`result.json`，以及 Forge/NeoForge 的 `installer.log`。
 
-边界：旧式 Forge 安装器缺少 `version.json` 时拒绝安装；不猜测 NeoForge 快照或旧版特殊坐标。Java 主版本遵循实例元数据，未声明时由启动检查负责。加载器使用各自官方源，现有下载源继续处理 Mojang 文件。不自动安装 Fabric API 等 Mod，也不改变 mrpack 导入要求目标已有匹配加载器的行为。
+边界：旧式 Forge 安装器缺少 `version.json` 时拒绝安装；不猜测 NeoForge 快照或旧版特殊坐标。Java 主版本遵循实例元数据，未声明时由启动检查负责。加载器使用各自官方源，现有下载源继续处理 Mojang 文件。不自动安装 Fabric API 等 Mod。后续新增的[新实例与整合包流程](packs-and-new-instances.md)可从空集合安装原版和加载器，供用户单独使用或由 mrpack 清单驱动；原有基于已安装原版的入口仍保留。
 
 ## 通用日志自动解析
 

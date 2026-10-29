@@ -54,7 +54,7 @@ MCP 增加只读 `minecraft_resolve_dependencies`。仅传 `instance_id` 返回�
 
 示例版本须匹配目标实例。返回 `local_report`、`remote_plan`、Mod 哈希和环境摘要；不创建安装计划文件或写入 JAR。需要实例读取权限及实例白名单，提供非空 `roots` 还需要目录读取权限。远程计划仅针对源站项目约束，本地报告单独返回；MCP 此接口不下载候选 JAR 做安装后组合验证。它不是安装授权，也不替代 GUI 的最终预览和确认。
 
-尚未覆盖任意运行期 Mixin/类加载行为、自动识别未知文件的源站项目、完整加载器语义仿真、自动修复/组包及锁定文件。GUI 资源安装和 MCP 写入的公共崩溃恢复已在后续补齐，见[计划与恢复](plans-and-recovery.md)。
+尚未覆盖任意运行期 Mixin/类加载行为、自动识别未知文件的源站项目、完整加载器语义仿真、自动修复/组包。内容锁定及 mrpack 交换已在后续补齐，见[新实例与整合包](packs-and-new-instances.md)。GUI 资源安装和 MCP 写入的公共崩溃恢复已在后续补齐，见[计划与恢复](plans-and-recovery.md)。
 
 ## 验证（2026-10-27）
 

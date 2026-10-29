@@ -73,7 +73,7 @@ cargo test -p mc-core -p mc-mcp -p desktop
 
 1. 用可持久化的真实 InstanceService / CatalogProvider 替换 GUI Mock；MCP 与 GUI 共用相同来源。
 2. 增加 get_mod_versions / resolve_dependencies / plan_mod_changes / preview_changes，计划只读。
-3. 在已完成的静态依赖求解、逐计划 GUI 审批和公共文件恢复上，继续扩展锁定文件、完整整合包流程及其他多步骤操作的事务覆盖。
+3. 在已完成的静态依赖求解、逐计划 GUI 审批和公共文件恢复上，结合已完成的内容锁定与 mrpack 交换，继续扩展其他多步骤操作的事务覆盖及自动组包/汉化。
 4. 补充汉化任务队列、存档隔离、分级授权，必要时引入独立本地 REST API，默认仅绑定回环地址。
 
 ## 内置服务器权限

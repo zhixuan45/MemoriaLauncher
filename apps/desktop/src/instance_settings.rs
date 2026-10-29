@@ -358,7 +358,9 @@ pub fn view(state: &State, blocked: bool) -> Element<'_, AppMessage> {
             .padding(10)
             .on_press(dispatch(Message::Tab(true))),
         button(label("变更计划与恢复",12.)).style(theme::quiet).padding(10)
-            .on_press_maybe(enabled.then_some(AppMessage::OpenPlans))
+            .on_press_maybe(enabled.then_some(AppMessage::OpenPlans)),
+        button(label("锁定与导出",12.)).style(theme::quiet).padding(10)
+            .on_press_maybe(enabled.then_some(AppMessage::OpenPackExport))
     ]
     .spacing(8);
     let mut body = column![].spacing(12);

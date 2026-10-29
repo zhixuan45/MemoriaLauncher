@@ -110,13 +110,29 @@ fn invalid(message: impl Into<String>) -> LauncherError {
     LauncherError::InvalidMetadata(message.into())
 }
 
-/// A job keeps its source and concurrency snapshot for its entire lifetime.
-pub async fn install_vanilla(
-    client: DownloadClient,
-    layout: GameLayout,
+#[derive(Debug, Clone)]
+pub struct VanillaPlan {
     id: String,
-    progress: ProgressCallback,
-) -> LauncherResult<()> {
+    metadata: Vec<u8>,
+    metadata_file: DownloadFile,
+    files: Vec<DownloadFile>,
+}
+impl VanillaPlan {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn files(&self) -> &[DownloadFile] {
+        &self.files
+    }
+    pub fn required_java(&self) -> Option<u32> {
+        serde_json::from_slice::<serde_json::Value>(&self.metadata).ok()?["javaVersion"]
+            ["majorVersion"]
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+    }
+}
+/// Resolve and pin the official metadata and asset index without writing installation files.
+pub async fn preview_vanilla(client: DownloadClient, id: String) -> LauncherResult<VanillaPlan> {
     validate_id(&id)?;
     let manifest: Manifest = client
         .json(crate::service::downloads::VERSION_MANIFEST)
@@ -135,33 +151,56 @@ pub async fn install_vanilla(
     if version.id != id || version.inherits_from.is_some() || version.main_class.is_none() {
         return Err(invalid("当前只支持安装独立的原版客户端。"));
     }
-    let metadata_path = format!("versions/{id}/{id}.json");
-    let existing = layout.download_path(&metadata_path)?;
-    match tokio::fs::read(&existing).await {
-        Ok(previous) if previous != bytes => {
-            return Err(invalid(
-                "已有同名版本且配置不同，请先选择其他实例集，避免覆盖现有配置。",
-            ))
-        }
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
-        _ => {}
-    }
     validate_id(&version.asset_index.id)?;
     let index_file = version
         .asset_index
         .file
         .at(format!("assets/indexes/{}.json", version.asset_index.id));
-    client.download_file(&layout, index_file.clone()).await?;
-    let index_path = layout.download_path(&index_file.path)?;
-    let assets: Assets = serde_json::from_slice(&tokio::fs::read(index_path).await?)?;
+    if index_file
+        .sha1
+        .as_ref()
+        .is_none_or(|hash| hash.len() != 40 || !hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err(invalid("资源索引缺少有效 SHA-1，无法固定安装计划"));
+    }
+    let index_bytes = client.bytes(&index_file.url, 64 * 1024 * 1024).await?;
+    crate::service::downloads::verify_sha1(
+        &format!("{:x}", Sha1::digest(&index_bytes)),
+        index_file.sha1.as_deref(),
+    )?;
+    if index_file
+        .size
+        .is_some_and(|size| size != index_bytes.len() as u64)
+    {
+        return Err(invalid("资源索引大小不匹配"));
+    }
+    let assets: Assets = serde_json::from_slice(&index_bytes)?;
     if assets.virtual_assets || assets.map_to_resources {
         return Err(LauncherError::Unsupported(
             "此旧版使用 virtual/map_to_resources 资源布局，当前尚不支持安装。".into(),
         ));
     }
+    let validation = GameLayout::new(std::env::temp_dir().join(format!(
+        "memoria-metadata-validation-{}",
+        uuid::Uuid::new_v4()
+    )))?;
     let mut files = BTreeMap::new();
+    let mut declared_bytes = 0u64;
     let mut insert = |file: DownloadFile| -> LauncherResult<()> {
-        layout.download_path(&file.path)?;
+        validation.download_path(&file.path)?;
+        if !files.contains_key(&file.path) {
+            declared_bytes = declared_bytes
+                .checked_add(file.size.unwrap_or(0))
+                .ok_or_else(|| invalid("游戏文件大小溢出"))?;
+            if files.len() >= 200000
+                || declared_bytes > 8 * 1024 * 1024 * 1024
+                || file.size.is_some_and(|size| size > 128 * 1024 * 1024)
+            {
+                return Err(invalid(
+                    "游戏文件超过数量或大小预算（20 万项/8 GiB，单文件 128 MiB）",
+                ));
+            }
+        }
         if let Some(previous) = files.insert(file.path.clone(), file.clone()) {
             if previous.sha1 != file.sha1 || previous.url != file.url {
                 return Err(invalid(format!("重复下载路径的内容不一致：{}", file.path)));
@@ -169,10 +208,18 @@ pub async fn install_vanilla(
         }
         Ok(())
     };
+    insert(index_file)?;
     let game = version
         .downloads
         .get("client")
         .ok_or_else(|| invalid("版本没有客户端 JAR 下载信息"))?;
+    if game
+        .sha1
+        .as_ref()
+        .is_none_or(|hash| hash.len() != 40 || !hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err(invalid("客户端缺少有效 SHA-1，无法固定安装计划"));
+    }
     insert(game.at(format!("versions/{id}/{id}.jar")))?;
     let platform = Platform::current();
     for library in version.libraries {
@@ -244,20 +291,45 @@ pub async fn install_vanilla(
                 .at(format!("assets/log_configs/{}", logging.file.id)),
         )?;
     }
+    Ok(VanillaPlan {
+        metadata_file: DownloadFile {
+            url: entry.url,
+            path: format!("versions/{id}/{id}.json"),
+            sha1: Some(entry.sha1),
+            size: Some(bytes.len() as u64),
+        },
+        id,
+        metadata: bytes,
+        files: files.into_values().collect(),
+    })
+}
+pub async fn install_vanilla_plan(
+    client: DownloadClient,
+    layout: GameLayout,
+    plan: VanillaPlan,
+    progress: ProgressCallback,
+) -> LauncherResult<()> {
+    let existing = layout.download_path(&plan.metadata_file.path)?;
+    match tokio::fs::read(&existing).await {
+        Ok(bytes) if bytes != plan.metadata => {
+            return Err(invalid("已有同名版本且配置不同，不会覆盖。"))
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
     client
-        .download_files(layout.clone(), files.into_values().collect(), progress)
+        .download_files(layout.clone(), plan.files, progress)
         .await?;
-    // Publish the version only after all dependencies have passed verification.
-    client
-        .download_file(
-            &layout,
-            DownloadFile {
-                url: entry.url,
-                path: metadata_path,
-                sha1: Some(entry.sha1),
-                size: Some(bytes.len() as u64),
-            },
-        )
-        .await?;
+    client.download_file(&layout, plan.metadata_file).await?;
     Ok(())
+}
+/// A job keeps its source and concurrency snapshot for its entire lifetime.
+pub async fn install_vanilla(
+    client: DownloadClient,
+    layout: GameLayout,
+    id: String,
+    progress: ProgressCallback,
+) -> LauncherResult<()> {
+    let plan = preview_vanilla(client.clone(), id).await?;
+    install_vanilla_plan(client, layout, plan, progress).await
 }

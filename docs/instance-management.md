@@ -20,6 +20,12 @@ Windows 系统颜色通过 [DwmGetColorizationColor](https://learn.microsoft.com
 
 背景仅支持有效 PNG，最多 16 MiB、8192×8192 像素；导入后复制到启动器数据目录，原图移动不影响已保存背景。外观配置在启动器数据目录的 `appearance.json`，支持 `MEMORIA_DATA_DIR` 覆盖。
 
+## 新建实例、锁定与整合包交换
+
+“游戏下载 → 新建实例 / 导入整合包”可以直接创建 Fabric、Quilt、Forge、NeoForge 实例，自动准备原版；也可读入本地 mrpack。目录整合包的资源向导提供“新建整合包实例”，调用相同流程。
+
+“管理实例 → 锁定与导出”可生成/验证内容锁定、预览并导出 mrpack。配置和脚本需显式勾选；来源引用或本地覆盖内容、Core 接口和支持范围见[说明](packs-and-new-instances.md)。
+
 ## 第三方资源安装
 
 1. 在游戏下载中选择 Mod、整合包、资源包或光影包，搜索并打开项目。
@@ -29,7 +35,7 @@ Windows 系统颜色通过 [DwmGetColorizationColor](https://learn.microsoft.com
 
 Mod、资源包、光影分别部署到实例内的 `mods/`、`resourcepacks/`、`shaderpacks/`。Mod 必需依赖使用回溯选版，同时保留其他已安装来源项目；预览下载并校验候选 JAR，与保留文件一起检查前置和冲突。可选依赖提示后由用户另选。未知来源文件可检查 Mod ID 声明，但不会猜测源站项目身份或自动升级。
 
-整合包按 [Modrinth mrpack 格式](https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack) 解析，读取清单下载文件并校验哈希，跳过仅服务端文件，可选客户端文件由复选框控制；`client-overrides` 在共享 `overrides` 之后应用。目标实例必须已安装清单要求的 Minecraft 与相同版本加载器。建议准备独立目标实例；此资源部署流程不自动运行加载器安装器；可先通过专用的[加载器安装入口](loaders-and-diagnostics.md)创建匹配的独立实例。
+整合包按 [Modrinth mrpack 格式](https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack) 解析，读取清单下载文件并校验哈希，跳过仅服务端文件，可选客户端文件由复选框控制；`client-overrides` 在共享 `overrides` 之后应用。部署到已有实例时必须匹配 Minecraft 与加载器版本；也可选择“新建整合包实例”，按清单自动安装原版及加载器，再部署内容。新实例流程中的 Forge/NeoForge 安装器会在预览中明确说明，确认后执行。
 
 远程单文件最多 64 MiB、单次计划合计最多 1 GiB；Mod JAR 同时受结构检查的 32 MiB 上限限制。整合包覆盖文件仅允许游戏内容目录（如 `config/`、`mods/`、`resourcepacks/`、`kubejs/` 等），拒绝目录穿越、链接和启动器元数据路径。
 
@@ -41,6 +47,7 @@ Mod、资源包、光影分别部署到实例内的 `mods/`、`resourcepacks/`�
 实例目录/
   .memoria/
     instance-settings.json
+    instance-lock.json       # 版本声明、内容哈希及可复用来源
     removed-mods/
     resource-install.json
     resource-installs/<操作 ID>/
