@@ -43,6 +43,8 @@ mod instance_wizard;
 mod pack_export;
 mod shell;
 mod sidebar;
+mod project_menu;
+mod project_preferences;
 mod theme;
 mod updates;
 mod verification;

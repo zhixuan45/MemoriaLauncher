@@ -835,6 +835,9 @@ mod captures;
 #[path = "workspace_ui_tests.rs"]
 mod workspace_ui;
 
+#[path="project_menu_tests.rs"]
+mod project_menu_controls;
+
 #[path = "instance_features_tests.rs"]
 mod instance_features;
 

@@ -301,6 +301,7 @@ pub async fn scan(root: PathBuf) -> Result<LocalData, String> {
 
 pub fn launch(
     environment: Environment,
+    downloads: mc_core::DownloadSettings,
     key: String,
     account_id: String,
     provider: crate::accounts::Provider,
@@ -315,14 +316,16 @@ pub fn launch(
                 let result = async {
                     let config = mc_core::service::desktop_instances::load_settings(&environment.game_root, &key)
                         .map_err(mc_core::LauncherError::InvalidMetadata)?;
-                    let java_path = config.java.as_ref().unwrap_or(&environment.java);
-                    let java = mc_core::JavaRuntime::inspect(java_path).await?;
+                    let layout = GameLayout::new(&environment.game_root)?;
+                    let required = LocalClientService::new(layout.clone()).required_java_major(key.clone()).await?;
+                    let java = crate::java_environment::select_for_launch(required, config.java.clone(), &environment)
+                        .await.map_err(mc_core::LauncherError::JavaUnavailable)?;
                     let memory =
                         tokio::task::spawn_blocking(crate::runtime_memory::MemorySnapshot::read)
                             .await
                             .map_err(|e| mc_core::LauncherError::Internal(e.to_string()))?;
                     let mut effective = environment.clone();
-                    effective.java = java_path.clone();
+                    effective.java = java.executable.clone();
                     if let Some(value) = config.memory_mb {
                         effective.memory_mode = crate::runtime_memory::MemoryMode::Fixed;
                         effective.max_memory_mb = value;
@@ -332,20 +335,24 @@ pub fn launch(
                         .resolved_launch_options(memory, &java.arch)
                         .map_err(mc_core::LauncherError::JavaUnavailable)?;
                     config.apply(&mut options).map_err(mc_core::LauncherError::InvalidMetadata)?;
-                    let layout = GameLayout::new(environment.game_root)?;
+                    options.java = java.executable.clone();
                     let launcher = GameLauncher::new(layout, Arc::new(provider));
-                    launcher
+                    launcher.repair_logging(&key, &mc_core::DownloadClient::new(downloads)?).await?;
+                    let process = launcher
                         .prepare(&key, &account_id, options)
                         .await?
                         .spawn()
-                        .await
+                        .await?;
+                    Ok::<_, mc_core::LauncherError>((process, java))
                 }
                 .await;
                 match result {
-                    Ok(process) => {
+                    Ok((process, java)) => {
                         let description = format!(
-                            "游戏已启动（PID {}），日志：{}",
+                            "游戏已启动（PID {}）· Java {}（{}），日志：{}",
                             process.id().unwrap_or_default(),
+                            java.major_version,
+                            java.executable.display(),
                             process.log_path().display()
                         );
                         let _ = output.send(Message::GameStarted(description)).await;

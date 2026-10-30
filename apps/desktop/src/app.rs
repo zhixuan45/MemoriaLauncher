@@ -109,6 +109,7 @@ pub enum Message {
     SelectInstance(String),
     LaunchInstance(std::path::PathBuf, String),
     Workspace(crate::workspace::Message),
+    ProjectMenu(crate::project_menu::Message),
     ChatReply(uuid::Uuid, crate::ai::Message),
     MoveInstance(String, i32),
     Launch,
@@ -170,6 +171,7 @@ pub struct Launcher {
     pub download: crate::download::State,
     pub ai: crate::ai::State,
     pub workspace: crate::workspace::State,
+    pub project_menu: crate::project_menu::State,
     pub selections: crate::selections::State,
     pub ai_settings: crate::ai_settings::State,
     pub mcp_settings: crate::mcp_settings::State,
@@ -243,6 +245,7 @@ impl Launcher {
             download,
             ai,
             workspace: crate::workspace::State::default(),
+            project_menu: crate::project_menu::State::load(),
             selections: crate::selections::State::load(),
             ai_settings,
             mcp_settings,
@@ -408,6 +411,7 @@ impl Launcher {
                 }
             }
             Message::Workspace(message) => return crate::workspace::update(self, message),
+            Message::ProjectMenu(message) => return crate::project_menu::update(self,message),
             Message::ChatReply(id, message) => {
                 return crate::workspace::update_ai(self, id, message)
             }
@@ -487,9 +491,10 @@ impl Launcher {
                     }
                 };
                 self.launching = true;
-                self.status = "正在验证账户、Java 和游戏依赖…".into();
+                self.status = "正在匹配 Java、补全日志配置并验证游戏依赖…".into();
                 return crate::local::launch(
                     self.environment.clone(),
+                    self.download_settings.saved.clone(),
                     key,
                     account.id.clone(),
                     provider,
@@ -669,7 +674,7 @@ impl Launcher {
             Message::Event(Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))) => {
                 self.drag = None
             }
-            Message::Event(Event::Window(window::Event::Unfocused)) => self.drag = None,
+            Message::Event(Event::Window(window::Event::Unfocused)) => { self.drag = None; self.project_menu.menu=None; },
             Message::Event(Event::Window(window::Event::Resized(size))) => self.viewport = size,
             Message::Event(Event::Window(window::Event::CloseRequested)) => {
                 return self.update(Message::Close)
@@ -678,6 +683,7 @@ impl Launcher {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
             })) => {
+                if self.project_menu.menu.take().is_some() { return Task::none(); }
                 self.dismiss_modal();
                 self.drag = None;
                 self.edit_layout = false;
@@ -857,6 +863,7 @@ impl Launcher {
     }
 
     pub(crate) fn open_modal(&mut self, modal: Modal) {
+        self.project_menu.menu = None;
         let now = Instant::now().max(self.animation_time);
         self.animation_time = now;
         if self.modal != Some(modal) {

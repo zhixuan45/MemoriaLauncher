@@ -37,6 +37,13 @@ impl LocalClientService {
         &self.layout
     }
 
+    pub async fn required_java_major(&self, key: String) -> LauncherResult<Option<u32>> {
+        let layout = self.layout.clone();
+        tokio::task::spawn_blocking(move || Ok(resolve(&layout, &key)?.required_java_major()))
+            .await
+            .map_err(|e| crate::LauncherError::Internal(e.to_string()))?
+    }
+
     pub async fn scan(&self) -> LauncherResult<ScanReport> {
         let layout = self.layout.clone();
         tokio::task::spawn_blocking(move || scan(&layout))
@@ -86,38 +93,18 @@ fn scan(layout: &GameLayout) -> LauncherResult<ScanReport> {
                     continue;
                 }
             };
+            let mc_version = resolved.mc_version();
+            let java_major = resolved.required_java_major();
             let meta = resolved.metadata;
-            let loader = meta.libraries.iter().find_map(|lib| {
-                let parts: Vec<_> = lib.name.split(':').collect();
-                let loader_type = match (parts.first().copied(), parts.get(1).copied()) {
-                    (Some("net.fabricmc"), Some("fabric-loader")) => LoaderType::Fabric,
-                    (Some("org.quiltmc"), Some("quilt-loader")) => LoaderType::Quilt,
-                    (Some("net.neoforged"), Some("neoforge")) => LoaderType::NeoForge,
-                    (Some("net.minecraftforge"), Some("forge")) => LoaderType::Forge,
-                    _ => return None,
-                };
-                Some(LoaderInfo {
-                    loader_type,
-                    version: parts.get(2).unwrap_or(&"").to_string(),
-                })
-            });
+            let loader = detect_loader(&meta);
             let created_at = meta
                 .release_time
                 .as_deref()
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|d| d.with_timezone(&Utc))
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-            // 根原版可能有显示用重命名；mc_version 取继承链的游戏 JAR 名称。
-            let mc_version = meta.client_version.unwrap_or_else(|| {
-                resolved
-                    .jar_path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string()
-            });
             report.clients.push(LocalClient {
-                java_major: meta.java_version.map(|j| j.major_version),
+                java_major,
                 client_jar_present: resolved.jar_path.is_file(),
                 instance: Instance {
                     id: key,
@@ -138,10 +125,80 @@ fn scan(layout: &GameLayout) -> LauncherResult<ScanReport> {
     Ok(report)
 }
 
+fn detect_loader(meta: &super::metadata::VersionMetadata) -> Option<LoaderInfo> {
+    // Modern NeoForge profiles can omit the neoforge artifact entirely.
+    // Its explicit version flag is stronger evidence than shared Forge/FML libraries.
+    for (flag, loader_type) in [
+        ("--fml.neoForgeVersion", LoaderType::NeoForge),
+        ("--fml.forgeVersion", LoaderType::Forge),
+    ] {
+        if let Some(version) = meta.game_argument(flag) {
+            return Some(LoaderInfo {
+                loader_type,
+                version,
+            });
+        }
+    }
+    meta.libraries.iter().find_map(|lib| {
+        let parts: Vec<_> = lib.name.split(':').collect();
+        let loader_type = match (parts.first().copied(), parts.get(1).copied()) {
+            (Some("net.fabricmc"), Some("fabric-loader")) => LoaderType::Fabric,
+            (Some("org.quiltmc"), Some("quilt-loader")) => LoaderType::Quilt,
+            (Some("net.neoforged"), Some("neoforge" | "forge")) => LoaderType::NeoForge,
+            (Some("net.minecraftforge"), Some("forge")) => LoaderType::Forge,
+            _ => return None,
+        };
+        Some(LoaderInfo {
+            loader_type,
+            version: parts.get(2).unwrap_or(&"").to_string(),
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::GameLayout;
+
+    #[test]
+    fn detects_explicit_neo_version_without_neoforge_artifact_and_ignores_names() {
+        for (arguments, expected_type, expected_version) in [
+            (
+                serde_json::json!({"game":["--fml.neoForgeVersion","21.1.252","--fml.fmlVersion","4.0.44","--launchTarget","forgeclient"]}),
+                LoaderType::NeoForge,
+                "21.1.252",
+            ),
+            (
+                serde_json::json!({"game":["--fml.neoForgeVersion=21.1.252"]}),
+                LoaderType::NeoForge,
+                "21.1.252",
+            ),
+            (
+                serde_json::json!({"game":["--fml.forgeVersion","47.3.0"]}),
+                LoaderType::Forge,
+                "47.3.0",
+            ),
+        ] {
+            let meta = serde_json::from_value(serde_json::json!({
+                "id":"renamed-client", "arguments":arguments,
+                "libraries":[{"name":"net.neoforged.fancymodloader:loader:4.0.44"}]
+            }))
+            .unwrap();
+            let loader = detect_loader(&meta).unwrap();
+            assert_eq!(loader.loader_type, expected_type);
+            assert_eq!(loader.version, expected_version);
+        }
+        let meta = serde_json::from_value(serde_json::json!({
+            "id":"NeoForge-name-only", "libraries":[]
+        }))
+        .unwrap();
+        assert!(detect_loader(&meta).is_none());
+        let meta = serde_json::from_value(serde_json::json!({
+            "id":"legacy", "minecraftArguments":"--fml.forgeVersion '47.3.0'", "libraries":[]
+        }))
+        .unwrap();
+        assert_eq!(detect_loader(&meta).unwrap().version, "47.3.0");
+    }
 
     #[tokio::test]
     async fn scans_plural_versions_with_inheritance_and_isolated_game_dirs() {

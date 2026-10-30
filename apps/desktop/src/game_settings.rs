@@ -86,7 +86,7 @@ impl State {
             draft,
             busy: false,
             notice: "修改后点击保存并应用；当前实例集中的版本将显示在主页。".into(),
-            java_notice: "可填写 Java 可执行文件的完整路径，或使用 PATH 中的 java。".into(),
+            java_notice: "启动时按实例版本自动匹配 Java；此处的 Java 匹配时优先使用，也可导入其他版本。".into(),
         }
     }
 

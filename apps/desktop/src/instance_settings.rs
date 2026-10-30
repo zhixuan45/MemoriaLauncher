@@ -481,7 +481,7 @@ pub fn view(state: &State, blocked: bool) -> Element<'_, AppMessage> {
     } else {
         for (title, value, placeholder, kind) in [
             ("显示名称", &state.name, "留空使用版本名称", 0),
-            ("Java 路径", &state.java, "留空继承全局 Java", 1),
+            ("Java 路径", &state.java, "留空按实例版本自动选择 Java", 1),
             ("最大内存 MiB", &state.memory, "留空继承全局内存策略", 2),
             ("窗口宽度", &state.width, "留空使用游戏默认", 3),
             ("窗口高度", &state.height, "留空使用游戏默认", 4),

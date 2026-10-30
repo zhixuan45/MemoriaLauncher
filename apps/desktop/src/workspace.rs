@@ -45,6 +45,7 @@ pub struct State {
     pub search_open: bool,
     pub query: String,
     collapsed: HashSet<(PathBuf, String)>,
+    archived: HashSet<Uuid>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -54,6 +55,7 @@ impl Default for State {
             search_open: false,
             query: String::new(),
             collapsed: HashSet::new(),
+            archived: HashSet::new(),
         }
     }
 }
@@ -77,6 +79,7 @@ impl State {
         std::iter::once(&self.current).chain(self.others.iter().rev().map(|c| &c.info))
     }
     pub fn visible<'a>(&'a self, info: &'a ConversationInfo) -> bool {
+        if self.archived.contains(&info.id) { return false }
         let query = self.query.trim().to_lowercase();
         query.is_empty()
             || info.title.to_lowercase().contains(&query)
@@ -99,6 +102,21 @@ impl State {
             *state = ai::State::default();
             state.connection = connection;
         }
+    }
+    pub fn is_archived(&self,id:Uuid) -> bool { self.archived.contains(&id) }
+    pub fn restore_chat(&mut self,id:Uuid) { self.archived.remove(&id); }
+    pub fn archive_project(&mut self,state:&mut ai::State,project:&Project) -> Result<usize,String> {
+        let matches = |info:&ConversationInfo| info.project.as_ref().is_some_and(|p|p.matches(&project.root,&project.instance_id));
+        let busy = |state:&ai::State| state.busy || state.loading_log || state.attachments.loading();
+        if (matches(&self.current) && busy(state)) || self.others.iter().any(|c|matches(&c.info) && busy(&c.state)) {
+            return Err("请等待此项目的请求或附件读取完成后再归档。".into());
+        }
+        if matches(&self.current) { self.new_chat(state,None); }
+        let mut count=0;
+        for conversation in &self.others {
+            if matches(&conversation.info) && self.archived.insert(conversation.info.id) { count+=1; }
+        }
+        Ok(count)
     }
     pub fn new_chat(&mut self, state: &mut ai::State, project: Option<Project>) {
         self.stash(state);
@@ -168,7 +186,7 @@ pub fn update(app: &mut Launcher, message: Message) -> Task<AppMessage> {
                 .workspace
                 .conversations()
                 .find(|c| {
-                    c.project
+                    !app.workspace.is_archived(c.id) && c.project
                         .as_ref()
                         .is_some_and(|p| p.matches(&context.root, &context.instance_id))
                 })

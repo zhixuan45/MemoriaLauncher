@@ -121,7 +121,7 @@ impl GameLauncher {
                 game_directory: layout.version_dir(&key)?,
                 instance_id: key,
                 java_major: java.major_version,
-                required_java_major: version.metadata.java_version.map(|j| j.major_version),
+                required_java_major: version.required_java_major(),
                 classpath_entries: files.classpath.len(),
                 native_archives: files.natives.len(),
             })
@@ -145,6 +145,67 @@ impl GameLauncher {
         tokio::task::spawn_blocking(move || build_plan(&layout, &key, &java, &session, &options))
             .await
             .map_err(|e| LauncherError::Internal(e.to_string()))?
+    }
+
+    /// Repair only the declared logging resource; game and mod files are never guessed.
+    pub async fn repair_logging(
+        &self,
+        key: &str,
+        client: &crate::DownloadClient,
+    ) -> LauncherResult<()> {
+        let layout = self.layout.clone();
+        let key = key.to_string();
+        let file = tokio::task::spawn_blocking(move || {
+            let version = metadata::resolve(&layout, &key)?;
+            let Some(logging) = version.metadata.logging.get("client") else {
+                return Ok(None);
+            };
+            super::layout::validate_id(&logging.file.id)?;
+            let relative = format!("assets/log_configs/{}", logging.file.id);
+            let path = layout.path(&relative)?;
+            let descriptor = Artifact {
+                path: None,
+                sha1: logging.file.sha1.clone(),
+                size: logging.file.size,
+            };
+            let mut missing = Vec::new();
+            verify(&path, Some(&descriptor), true, &mut missing)?;
+            if missing.is_empty() {
+                return Ok(None);
+            }
+            let sha1 = logging
+                .file
+                .sha1
+                .as_ref()
+                .filter(|hash| hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+                .ok_or_else(|| {
+                    LauncherError::InvalidMetadata("日志配置缺少有效 SHA-1，无法自动补全".into())
+                })?;
+            let size = logging
+                .file
+                .size
+                .filter(|size| *size > 0 && *size <= 1024 * 1024)
+                .ok_or_else(|| {
+                    LauncherError::InvalidMetadata(
+                        "日志配置缺少有效大小（最多 1 MiB），无法自动补全".into(),
+                    )
+                })?;
+            let url = logging.file.url.clone().ok_or_else(|| {
+                LauncherError::InvalidMetadata("日志配置缺少下载地址，无法自动补全".into())
+            })?;
+            Ok::<_, LauncherError>(Some(crate::DownloadFile {
+                url,
+                path: relative,
+                sha1: Some(sha1.clone()),
+                size: Some(size),
+            }))
+        })
+        .await
+        .map_err(|e| LauncherError::Internal(e.to_string()))??;
+        if let Some(file) = file {
+            client.download_file(&self.layout, file).await?;
+        }
+        Ok(())
     }
 }
 
@@ -176,11 +237,11 @@ fn platform_for(java: &JavaRuntime) -> Platform {
 }
 
 fn check_java(java: &JavaRuntime, version: &ResolvedVersion) -> LauncherResult<()> {
-    if let Some(required) = &version.metadata.java_version {
-        if java.major_version != required.major_version {
+    if let Some(required) = version.required_java_major() {
+        if java.major_version != required {
             return Err(LauncherError::JavaUnavailable(format!(
                 "该版本元数据要求 Java {}，已选择 Java {}；请指定匹配的 --java",
-                required.major_version, java.major_version
+                required, java.major_version
             )));
         }
     }
@@ -389,6 +450,10 @@ fn build_plan(
     session: &AuthSession,
     options: &LaunchOptions,
 ) -> LauncherResult<LaunchPlan> {
+    // Java libraries may reject Windows extended-length paths produced by canonicalize.
+    // Only use the conventional spelling when it resolves to the same existing root.
+    let java_layout = java_compatible_layout(layout)?;
+    let layout = &java_layout;
     let version = metadata::resolve(layout, key)?;
     check_java(java, &version)?;
     let platform = platform_for(java);
@@ -401,6 +466,11 @@ fn build_plan(
         format!("-Xms{}M", options.min_memory_mb),
         format!("-Xmx{}M", options.max_memory_mb),
     ];
+    if let Some(logging) = version.metadata.logging.get("client") {
+        super::layout::validate_id(&logging.file.id)?;
+        let path = layout.path(format!("assets/log_configs/{}", logging.file.id))?;
+        arguments.push(logging.argument.replace("${path}", &path.to_string_lossy()));
+    }
     arguments.extend(options.extra_jvm_args.iter().cloned());
     let (parent, id) = key
         .split_once('/')
@@ -440,12 +510,67 @@ fn build_plan(
         natives_directory,
         log_path,
         natives: files.natives,
-        secrets: vec![
-            session.access_token.clone(),
-            session.xuid.clone(),
-            session.client_id.clone(),
-        ],
+        secrets: if session.is_offline {
+            Vec::new()
+        } else {
+            vec![
+                session.access_token.clone(),
+                session.xuid.clone(),
+                session.client_id.clone(),
+            ]
+        },
     })
+}
+
+fn java_compatible_layout(layout: &GameLayout) -> LauncherResult<GameLayout> {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut components = layout.root().components();
+        let candidate = match components.next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::VerbatimDisk(drive) => Some(PathBuf::from(format!("{}:\\", drive as char))),
+                Prefix::VerbatimUNC(server, share) => {
+                    let mut path = PathBuf::from(r"\\");
+                    path.push(server);
+                    path.push(share);
+                    Some(path)
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(mut candidate) = candidate {
+            for component in components {
+                if let Component::Normal(part) = component {
+                    candidate.push(part);
+                }
+            }
+            if let (Ok(original), Ok(converted)) =
+                (layout.root().canonicalize(), candidate.canonicalize())
+            {
+                if original == converted {
+                    return GameLayout::new(candidate);
+                }
+            }
+        }
+    }
+    Ok(layout.clone())
+}
+
+#[cfg(all(test, windows))]
+mod windows_path_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_game_root_is_converted_to_an_equivalent_java_path() {
+        let root = std::env::temp_dir().canonicalize().unwrap();
+        assert!(root.to_string_lossy().starts_with(r"\\?\"));
+        let layout = GameLayout::new(&root).unwrap();
+        let converted = java_compatible_layout(&layout).unwrap();
+        assert!(!converted.root().to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(converted.root().canonicalize().unwrap(), root);
+    }
 }
 
 fn build_upstream_arguments(
@@ -574,7 +699,14 @@ fn build_legacy_arguments(
         ),
         ("auth_xuid", session.xuid.clone()),
         ("clientid", session.client_id.clone()),
-        ("user_type", if session.is_offline { "Legacy".into() } else { "msa".into() }),
+        (
+            "user_type",
+            if session.is_offline {
+                "Legacy".into()
+            } else {
+                "msa".into()
+            },
+        ),
         ("user_properties", "{}".into()),
         ("version_name", version.metadata.id.clone()),
         (
@@ -691,7 +823,7 @@ fn substitute(template: &str, vars: &HashMap<&str, String>) -> LauncherResult<St
     Ok(output)
 }
 
-fn tokenize_legacy(input: &str) -> LauncherResult<Vec<String>> {
+pub(crate) fn tokenize_legacy(input: &str) -> LauncherResult<Vec<String>> {
     let mut args = Vec::new();
     let mut token = String::new();
     let mut quote = None;

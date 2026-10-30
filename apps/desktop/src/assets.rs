@@ -54,6 +54,10 @@ pub enum Icon {
     Close,
     Edit,
     Info,
+    More,
+    Pin,
+    Archive,
+    List,
 }
 
 // Stable handles avoid rebuilding and hashing SVG XML on every view update.
@@ -85,7 +89,8 @@ fn make_icon(kind: Icon, rgba: [u8; 4]) -> svg::Handle {
         Icon::Home => "M3 11 12 3l9 8M5 10v11h5v-7h4v7h5V10",
         Icon::Download => "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
         Icon::Spark => "m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3ZM21 2v4m-2-2h4",
-        Icon::Settings => "M9 3h6v3l3 2 3-1 2 5-3 2v3l-4 4-3-1-3 1-4-4v-3L2 12l2-5 3 1 2-2ZM16 12a4 4 0 1 0-8 0 4 4 0 0 0 8 0",
+        // Settings, Pin and List follow Lucide's 24px outline geometry (ISC).
+        Icon::Settings => "M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915M15 12a3 3 0 1 0-6 0a3 3 0 1 0 6 0",
         Icon::Play => "m8 4 12 8-12 8Z",
         Icon::Sliders => "M3 6h18M3 12h18M3 18h18M8 3v6m8 0v6m-7 0v6",
         Icon::Cube => "m12 2 10 5v10l-10 5-10-5V7Zm0 10v10M2 7l10 5L22 7M7 4l10 5",
@@ -101,6 +106,10 @@ fn make_icon(kind: Icon, rgba: [u8; 4]) -> svg::Handle {
         Icon::Close => "m6 6 12 12M6 18 18 6",
         Icon::Edit => "M3 3h7v7H3Zm11 0h7v7h-7ZM3 14h7v7H3Zm11 0h7v7h-7Z",
         Icon::Info => "M12 8h.1m-.1 4v5M22 12a10 10 0 1 0-20 0 10 10 0 0 0 20 0",
+        Icon::More => "M5 12h.1M12 12h.1M19 12h.1",
+        Icon::Pin => "M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z",
+        Icon::Archive => "M3 3h18v5H3ZM5 8v13h14V8M9 12h6",
+        Icon::List => "M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13",
     };
     let color = format!("rgb({},{},{})", rgba[0], rgba[1], rgba[2]);
     let fill = if matches!(kind, Icon::Play | Icon::Spark) {
@@ -109,8 +118,9 @@ fn make_icon(kind: Icon, rgba: [u8; 4]) -> svg::Handle {
         "none"
     };
     let opacity = rgba[3] as f32 / 255.;
+    let transform = if kind == Icon::Pin { r#" transform="rotate(35 12 12)""# } else { "" };
     let xml = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="{fill}" stroke="{color}" opacity="{opacity}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}"{transform} fill="{fill}" stroke="{color}" opacity="{opacity}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
     );
     svg::Handle::from_memory(xml.into_bytes())
 }

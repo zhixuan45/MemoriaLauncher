@@ -45,7 +45,8 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
     stack![
         app.appearance.saved.wallpaper.as_ref().map(|path| -> Element<'_,Message> {iced::widget::image(iced::widget::image::Handle::from_path(path)).width(Fill).height(Fill).content_fit(ContentFit::Cover).into()}).unwrap_or_else(||Space::new().width(Fill).height(Fill).into()),
         crate::motion::fade(shell, 1.0, app.modal.is_none()),
-        overlay
+        overlay,
+        crate::project_menu::overlay(app)
     ]
     .into()
 }

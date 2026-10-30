@@ -345,9 +345,155 @@ pub async fn inspect(path: PathBuf) -> Result<JavaRuntime, String> {
         .map_err(|error| error.to_string())
 }
 
+fn choose_runtime<'a>(
+    runtimes: &'a [JavaRuntime],
+    required: Option<u32>,
+    preferred: &Path,
+) -> Option<&'a JavaRuntime> {
+    let preferred = key(preferred);
+    runtimes
+        .iter()
+        .filter(|java| required.is_none_or(|major| java.major_version == major))
+        .min_by_key(|java| {
+            (
+                matches!(
+                    java.arch.as_str(),
+                    "x86" | "i386" | "i486" | "i586" | "i686"
+                ),
+                key(&java.executable) != preferred,
+                java.executable.clone(),
+            )
+        })
+}
+
+pub async fn select_for_launch(
+    required: Option<u32>,
+    instance_java: Option<PathBuf>,
+    environment: &crate::local::Environment,
+) -> Result<JavaRuntime, String> {
+    if let Some(path) = instance_java {
+        let java = inspect(path).await?;
+        if required.is_some_and(|major| java.major_version != major) {
+            return Err(format!(
+                "该实例需要 Java {}，独立设置指定了 Java {}；请修改实例 Java 路径，或清空以恢复自动选择。",
+                required.unwrap(), java.major_version
+            ));
+        }
+        return Ok(java);
+    }
+    let preferred = inspect(environment.java.clone()).await;
+    if let Ok(java) = &preferred {
+        if required.is_none_or(|major| java.major_version == major)
+            && !matches!(
+                java.arch.as_str(),
+                "x86" | "i386" | "i486" | "i586" | "i686"
+            )
+        {
+            return Ok(java.clone());
+        }
+    }
+    let mut explicit = environment.java_paths.clone();
+    explicit.push(environment.java.clone());
+    let report = discover(environment.game_roots.clone(), explicit).await?;
+    if let Some(java) = choose_runtime(&report.runtimes, required, &environment.java) {
+        return Ok(java.clone());
+    }
+    // Keep a working PATH runtime even if filesystem discovery could not resolve its path.
+    if let Ok(java) = preferred {
+        if required.is_none_or(|major| java.major_version == major) {
+            return Ok(java);
+        }
+    }
+    Err(format!(
+        "未找到{}。请在设置 → 游戏设置中导入匹配的 Java 后重试。{}",
+        required
+            .map(|major| format!("Java {major}"))
+            .unwrap_or_else(|| "可用 Java".into()),
+        report
+            .failures
+            .first()
+            .map(|error| format!(" 检测信息：{error}"))
+            .unwrap_or_default(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_java_matches_major_prefers_64_bit_and_preserves_compatible_preference() {
+        let runtime = |path: &str, major, arch: &str| JavaRuntime {
+            executable: path.into(),
+            major_version: major,
+            arch: arch.into(),
+            version: format!("{major}.0.1"),
+            os_version: String::new(),
+        };
+        let runtimes = vec![
+            runtime("java25", 25, "amd64"),
+            runtime("java21-32", 21, "x86"),
+            runtime("java17", 17, "amd64"),
+            runtime("java21", 21, "amd64"),
+        ];
+        assert_eq!(
+            choose_runtime(&runtimes, Some(21), Path::new("java17"))
+                .unwrap()
+                .executable,
+            Path::new("java21")
+        );
+        assert_eq!(
+            choose_runtime(&runtimes, Some(21), Path::new("java21-32"))
+                .unwrap()
+                .executable,
+            Path::new("java21")
+        );
+        assert_eq!(
+            choose_runtime(&runtimes, Some(17), Path::new("java21"))
+                .unwrap()
+                .executable,
+            Path::new("java17")
+        );
+        assert_eq!(
+            choose_runtime(&runtimes, None, Path::new("java17"))
+                .unwrap()
+                .executable,
+            Path::new("java17")
+        );
+        assert!(choose_runtime(&runtimes, Some(8), Path::new("java17")).is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires installed Java runtimes and MEMORIA_TEST_GAME_ROOT"]
+    async fn selects_java_for_real_instance_when_global_java_is_incompatible() {
+        let root = PathBuf::from(std::env::var_os("MEMORIA_TEST_GAME_ROOT").unwrap());
+        let instance_key = std::env::var("MEMORIA_TEST_INSTANCE").unwrap();
+        let required = mc_core::LocalClientService::new(mc_core::GameLayout::new(&root).unwrap())
+            .required_java_major(instance_key)
+            .await
+            .unwrap();
+        let environment = crate::local::Environment {
+            game_root: root.clone(),
+            game_roots: vec![root],
+            java: std::env::var_os("MEMORIA_TEST_WRONG_JAVA").unwrap().into(),
+            ..Default::default()
+        };
+        let selected = select_for_launch(required, None, &environment)
+            .await
+            .unwrap();
+        eprintln!(
+            "Selected Java {} ({}) {}",
+            selected.major_version,
+            selected.arch,
+            selected.executable.display()
+        );
+        assert_eq!(Some(selected.major_version), required);
+        assert_ne!(key(&selected.executable), key(&environment.java));
+        let error = select_for_launch(required, Some(environment.java.clone()), &environment)
+            .await
+            .unwrap_err();
+        assert!(error.contains("独立设置"));
+    }
 
     #[test]
     fn finds_nested_and_imported_java_without_duplicates_or_scanning_library_trees() {

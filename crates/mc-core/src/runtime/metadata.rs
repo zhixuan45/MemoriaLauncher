@@ -103,6 +103,7 @@ pub(crate) struct Logging {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct LogFile {
     pub id: String,
+    pub url: Option<String>,
     pub sha1: Option<String>,
     pub size: Option<u64>,
 }
@@ -110,6 +111,70 @@ pub(crate) struct LogFile {
 pub(crate) struct ResolvedVersion {
     pub metadata: VersionMetadata,
     pub jar_path: PathBuf,
+}
+
+impl ResolvedVersion {
+    pub(crate) fn mc_version(&self) -> String {
+        self.metadata.client_version.clone().unwrap_or_else(|| {
+            self.jar_path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
+
+    pub(crate) fn required_java_major(&self) -> Option<u32> {
+        if let Some(java) = &self.metadata.java_version {
+            return Some(java.major_version);
+        }
+        // Only infer known release families. Snapshots and future formats need metadata.
+        let version = self.mc_version();
+        let parts = version
+            .split('.')
+            .map(str::parse::<u32>)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        match parts.as_slice() {
+            [1, minor, ..] if *minor <= 16 => Some(8),
+            [1, 17, ..] => Some(16),
+            [1, 18..=19, ..] | [1, 20] | [1, 20, 0..=4] => Some(17),
+            [1, 20, patch] if *patch >= 5 => Some(21),
+            [1, 21, ..] => Some(21),
+            _ => None,
+        }
+    }
+}
+
+impl VersionMetadata {
+    pub(crate) fn game_argument(&self, name: &str) -> Option<String> {
+        fn value(args: &[Argument], name: &str) -> Option<String> {
+            for (index, arg) in args.iter().enumerate() {
+                let Argument::Plain(text) = arg else { continue };
+                if text == name {
+                    if let Some(Argument::Plain(value)) = args.get(index + 1) {
+                        return (!value.is_empty() && !value.starts_with('-'))
+                            .then(|| value.clone());
+                    }
+                } else if let Some((key, value)) = text.split_once('=') {
+                    if key == name && !value.is_empty() {
+                        return Some(value.into());
+                    }
+                }
+            }
+            None
+        }
+        if let Some(arguments) = &self.arguments {
+            if let Some(found) = value(&arguments.game, name) {
+                return Some(found);
+            }
+        }
+        let legacy = super::launch::tokenize_legacy(self.minecraft_arguments.as_deref()?).ok()?;
+        value(
+            &legacy.into_iter().map(Argument::Plain).collect::<Vec<_>>(),
+            name,
+        )
+    }
 }
 
 pub(crate) fn resolve(layout: &GameLayout, key: &str) -> LauncherResult<ResolvedVersion> {
@@ -244,4 +309,37 @@ pub(crate) fn maven_path(name: &str) -> LauncherResult<String> {
         classifier,
         extension
     ))
+}
+
+#[cfg(test)]
+mod java_tests {
+    use super::*;
+
+    #[test]
+    fn java_requirement_prefers_metadata_and_only_infers_known_releases() {
+        for (mc, expected) in [
+            ("1.7.10", Some(8)),
+            ("1.16.5", Some(8)),
+            ("1.17", Some(16)),
+            ("1.17.1", Some(16)),
+            ("1.18", Some(17)),
+            ("1.20.4", Some(17)),
+            ("1.20.5", Some(21)),
+            ("1.21.1", Some(21)),
+            ("24w14a", None),
+            ("1.22", None),
+            ("26.1", None),
+        ] {
+            let mut version = ResolvedVersion {
+                metadata: VersionMetadata {
+                    client_version: Some(mc.into()),
+                    ..Default::default()
+                },
+                jar_path: PathBuf::from("renamed.jar"),
+            };
+            assert_eq!(version.required_java_major(), expected, "{mc}");
+            version.metadata.java_version = Some(JavaVersion { major_version: 25 });
+            assert_eq!(version.required_java_major(), Some(25));
+        }
+    }
 }

@@ -49,6 +49,7 @@ Copy-Item -Path $SourceExe -Destination $DestExe -Force
 $McpSourceExe = Join-Path $env:CARGO_TARGET_DIR "release\mc-mcp.exe"
 $McpDestExe = Join-Path $DistDir "mc-mcp.exe"
 Copy-Item -Path $McpSourceExe -Destination $McpDestExe -Force
+Copy-Item -LiteralPath (Join-Path $ScriptDir "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $DistDir "THIRD_PARTY_NOTICES.md") -Force
 
 $FileInfo = Get-Item $DestExe
 $FileHash = (Get-FileHash -Path $DestExe -Algorithm SHA256).Hash

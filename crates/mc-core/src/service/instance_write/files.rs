@@ -123,12 +123,15 @@ pub fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 pub fn file_hash(path: &Path) -> Result<Option<String>> {
+    file_hash_with_limit(path, 64 * 1024 * 1024)
+}
+pub(crate) fn file_hash_with_limit(path: &Path, limit: usize) -> Result<Option<String>> {
     match fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(io_error(e)),
         Ok(meta) => {
             no_link(path)?;
-            if !meta.is_file() || meta.len() > 64 * 1024 * 1024 {
+            if !meta.is_file() || meta.len() > limit as u64 {
                 return Err(invalid("目标文件类型或大小不受支持"));
             }
             let mut reader = fs::File::open(path).map_err(io_error)?;
@@ -141,7 +144,7 @@ pub fn file_hash(path: &Path) -> Result<Option<String>> {
                     break;
                 }
                 total += n;
-                if total > 64 * 1024 * 1024 {
+                if total > limit {
                     return Err(invalid("目标文件过大"));
                 }
                 hash.update(&buffer[..n]);

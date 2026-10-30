@@ -12,6 +12,7 @@ pub(crate) fn error(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 const CONFIG: &str = ".memoria/instance-settings.json";
+const MAX_LOCAL_MOD_BYTES: usize = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -151,14 +152,16 @@ pub fn snapshot(root: &Path, key: &str) -> Result<Snapshot> {
                 continue;
             }
             let path = files::safe_join(&base, &format!("mods/{filename}")).map_err(error)?;
-            let bytes = files::read_bounded(&path, files::MAX_MOD_BYTES).map_err(error)?;
-            let name = mod_name(&bytes).unwrap_or_else(|| filename.clone());
+            let hash = files::file_hash_with_limit(&path, MAX_LOCAL_MOD_BYTES).map_err(error)?
+                .ok_or_else(|| format!("Mod 文件已消失：{filename}"))?;
+            let size = fs::metadata(&path).map_err(error)?.len();
+            let name = fs::File::open(&path).ok().and_then(mod_name).unwrap_or_else(|| filename.clone());
             mods.push(ModEntry {
                 filename,
                 name,
-                size: bytes.len() as u64,
+                size,
                 enabled: lower.ends_with(".jar"),
-                hash: super::instance_write::digest(&bytes),
+                hash,
             });
             if mods.len() > 1024 {
                 return Err("Mod 数量超过 1024".into());
@@ -172,9 +175,9 @@ pub fn snapshot(root: &Path, key: &str) -> Result<Snapshot> {
         mods,
     })
 }
-fn mod_name(bytes: &[u8]) -> Option<String> {
+fn mod_name(reader: impl std::io::Read + std::io::Seek) -> Option<String> {
     use std::io::Read;
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut zip = zip::ZipArchive::new(reader).ok()?;
     let mut entry = zip.by_name("fabric.mod.json").ok()?;
     if entry.size() > 65536 {
         return None;
@@ -201,7 +204,7 @@ pub fn change_mod(root: &Path, key: &str, action: ModAction) -> Result<Snapshot>
         ModAction::Toggle(entry) | ModAction::Remove(entry) => {
             let source =
                 files::safe_join(&base, &format!("mods/{}", entry.filename)).map_err(error)?;
-            if files::file_hash(&source).map_err(error)?.as_deref() != Some(&entry.hash) {
+            if files::file_hash_with_limit(&source, MAX_LOCAL_MOD_BYTES).map_err(error)?.as_deref() != Some(&entry.hash) {
                 return Err("Mod 文件已变化，请刷新后操作".into());
             }
             let lower = entry.filename.to_ascii_lowercase();
@@ -351,6 +354,31 @@ mod tests {
             .path();
         assert_eq!(fs::read(backup).unwrap(), bytes);
         assert!(directory(&root, "versions/../escape").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn large_local_mod_does_not_block_settings_and_can_be_toggled_and_removed() {
+        use std::io::{Seek,SeekFrom};
+        let root=fixture();
+        let path=root.join("versions/test/mods/large.jar");
+        let mut file=fs::File::create(&path).unwrap();
+        file.set_len(70*1024*1024).unwrap();
+        file.seek(SeekFrom::End(0)).unwrap();
+        file.write_all(&jar()).unwrap();
+        drop(file);
+        let initial=snapshot(&root,"versions/test").unwrap();
+        assert_eq!(initial.mods.len(),1);
+        assert!(initial.mods[0].size>64*1024*1024);
+        assert_eq!(initial.mods[0].name,"Example 1.0");
+        let config=InstanceSettings{name:"Large Mod Instance".into(),..Default::default()};
+        save_settings(&root,"versions/test",&config,&initial.config_hash).unwrap();
+        assert_eq!(snapshot(&root,"versions/test").unwrap().config,config);
+        let disabled=change_mod(&root,"versions/test",ModAction::Toggle(initial.mods[0].clone())).unwrap();
+        assert!(!disabled.mods[0].enabled);
+        let removed=change_mod(&root,"versions/test",ModAction::Remove(disabled.mods[0].clone())).unwrap();
+        assert!(removed.mods.is_empty());
+        assert!(root.join("versions/test/.memoria/removed-mods").is_dir());
         fs::remove_dir_all(root).unwrap();
     }
 }

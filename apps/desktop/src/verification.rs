@@ -54,6 +54,15 @@ fn delayed(message: Message) -> Task<Message> {
 }
 
 pub fn after_load(app: &mut Launcher) -> Task<Message> {
+    if let Some(id) = argument("--project-menu") {
+        let task = app.update(Message::ProjectMenu(crate::project_menu::Message::Open(id)));
+        return Task::batch([task,delayed(Message::Capture)]);
+    }
+    if let Some(id) = argument("--instance-settings") {
+        let _ = app.update(Message::SelectInstance(id));
+        let task = app.update(Message::EditInstance);
+        return Task::batch([task,delayed(Message::Capture)]);
+    }
     if app.verification.smoke {
         assert!(!app.loading);
         assert!(app.tasks.is_empty());

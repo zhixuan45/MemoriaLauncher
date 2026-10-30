@@ -119,14 +119,28 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
             .padding([8, 10]),
         );
     }
-    for instance in &app.instances {
+    let preferences=&app.project_menu.preferences;
+    let root=&app.environment.game_root;
+    let mut projects:Vec<_>=app.instances.iter().filter(|i|!preferences.hidden(root,&i.instance.id)).collect();
+    projects.sort_by_key(|i|(!preferences.pinned(root,&i.instance.id),preferences.section(root,&i.instance.id).to_string()));
+    let mut previous_group:Option<String>=None;
+    for instance in projects {
         let id = &instance.instance.id;
+        let group=if preferences.pinned(root,id){"置顶"}else{preferences.section(root,id)};
+        if previous_group.as_deref()!=Some(group) {
+            if !group.is_empty() || previous_group.is_some() {
+                list=list.push(container(label(if group.is_empty(){"项目"}else{group},11.).color(MUTED)).padding([8,8]));
+            }
+            previous_group=Some(group.into());
+        }
         let expanded = app.workspace.expanded(&app.environment.game_root, id);
         let selected = if app.page == Page::Ai {
             app.workspace.current.project.as_ref()
                 .is_some_and(|p|p.matches(&app.environment.game_root,id))
         } else { app.active == *id };
-        let title = instance.instance.name.chars().take(17).collect::<String>();
+        let limit=if app.viewport.width<1200.{11}else{14};
+        let mut title = instance.instance.name.chars().take(limit).collect::<String>();
+        if instance.instance.name.chars().count()>limit {title.push('…');}
         let select = button(
             row![
                 picture(art(instance), 25.),
@@ -182,6 +196,10 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
             .style(theme::quiet)
             .on_press(dispatch(workspace::Message::ToggleProject(id.clone()))),
             container(select).id(format!("project-{id}")),
+            container(
+                button(icon(Icon::More,MUTED,16.)).padding([10,5]).style(theme::quiet)
+                    .on_press(crate::app::Message::ProjectMenu(crate::project_menu::Message::Open(id.clone())))
+            ).id(format!("project-more-{id}")),
             launch,
         ]
         .spacing(1)
@@ -258,6 +276,30 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
             )
             .color(MUTED),
         );
+    }
+    let hidden:Vec<_>=app.instances.iter().filter(|i|preferences.hidden(root,&i.instance.id)).collect();
+    if !hidden.is_empty() {
+        list=list.push(button(label(format!("已移除项目（{}）",hidden.len()),11.).color(MUTED)).padding([8,4]).style(theme::quiet)
+            .on_press(crate::app::Message::ProjectMenu(crate::project_menu::Message::ToggleHidden)));
+        if app.project_menu.hidden_open {
+            for instance in hidden {
+                list=list.push(button(row![label(instance.instance.name.clone(),11.).width(Fill),label("恢复",10.).color(GREEN)].spacing(5))
+                    .width(Fill).padding([8,8]).style(theme::quiet)
+                    .on_press(crate::app::Message::ProjectMenu(crate::project_menu::Message::Restore(instance.instance.id.clone()))));
+            }
+        }
+    }
+    let archived:Vec<_>=app.workspace.conversations().filter(|c|app.workspace.is_archived(c.id)).collect();
+    if !archived.is_empty() {
+        list=list.push(button(label(format!("已归档对话（{}）",archived.len()),11.).color(MUTED)).padding([8,4]).style(theme::quiet)
+            .on_press(crate::app::Message::ProjectMenu(crate::project_menu::Message::ToggleArchived)));
+        if app.project_menu.archived_open {
+            for info in archived {
+                list=list.push(button(row![icon(Icon::Archive,MUTED,12.),label(format!("{} · 恢复",info.title),11.)].spacing(8))
+                    .padding([8,8]).style(theme::quiet)
+                    .on_press(crate::app::Message::ProjectMenu(crate::project_menu::Message::RestoreChat(info.id))));
+            }
+        }
     }
     let bottom = column![
         nav(

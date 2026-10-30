@@ -129,6 +129,91 @@ fn remote(url: &str, bytes: &[u8]) -> Value {
 }
 
 #[tokio::test]
+async fn launch_repairs_declared_logging_with_hashes_reuses_it_and_preserves_it_on_failure() {
+    let payload = b"<Configuration/>";
+    let server = Server::start(HashMap::from([("/logging.xml".into(), payload.to_vec())])).await;
+    let root = fixture();
+    let base = root.join("versions/1.21.1");
+    let child = root.join("versions/renamed");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::create_dir_all(&child).unwrap();
+    let mut metadata = json!({
+        "id":"1.21.1", "mainClass":"net.minecraft.client.main.Main",
+        "logging":{"client":{"argument":"-Dlog4j.configurationFile=${path}","file":{
+            "id":"client.xml", "url":format!("{}/logging.xml",server.base),
+            "sha1":hash(payload), "size":payload.len()
+        }}}
+    });
+    std::fs::write(
+        base.join("1.21.1.json"),
+        serde_json::to_vec(&metadata).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        child.join("renamed.json"),
+        br#"{"id":"renamed","inheritsFrom":"1.21.1"}"#,
+    )
+    .unwrap();
+    let launcher = mc_core::GameLauncher::new(
+        GameLayout::new(&root).unwrap(),
+        Arc::new(mc_core::OfflineAuthProvider),
+    );
+    let client = server.client(1);
+    let path = root.join("assets/log_configs/client.xml");
+    launcher
+        .repair_logging("versions/renamed", &client)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), payload);
+    launcher
+        .repair_logging("versions/renamed", &client)
+        .await
+        .unwrap();
+    assert_eq!(server.count("/logging.xml"), 1);
+    std::fs::write(&path, b"broken").unwrap();
+    launcher
+        .repair_logging("versions/renamed", &client)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), payload);
+    server
+        .routes
+        .lock()
+        .unwrap()
+        .insert("/logging.xml".into(), b"bad content!!!!!".to_vec());
+    std::fs::write(&path, b"keep on download failure").unwrap();
+    assert!(launcher
+        .repair_logging("versions/renamed", &client)
+        .await
+        .is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"keep on download failure");
+    metadata["logging"]["client"]["file"]["id"] = json!("../escape.xml");
+    std::fs::write(
+        base.join("1.21.1.json"),
+        serde_json::to_vec(&metadata).unwrap(),
+    )
+    .unwrap();
+    let requests = server.count("/logging.xml");
+    assert!(launcher
+        .repair_logging("versions/renamed", &client)
+        .await
+        .is_err());
+    assert_eq!(server.count("/logging.xml"), requests);
+    metadata["logging"]["client"]["file"]["id"] = json!("client.xml");
+    metadata["logging"]["client"]["file"]["sha1"] = json!(null);
+    std::fs::write(
+        base.join("1.21.1.json"),
+        serde_json::to_vec(&metadata).unwrap(),
+    )
+    .unwrap();
+    assert!(launcher
+        .repair_logging("versions/renamed", &client)
+        .await
+        .is_err());
+    assert_eq!(server.count("/logging.xml"), requests);
+}
+
+#[tokio::test]
 async fn transient_http_failures_retry_with_the_same_source_and_limit() {
     let payload = b"retry succeeds";
     let server = Server::start(HashMap::from([(

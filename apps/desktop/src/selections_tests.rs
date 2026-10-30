@@ -155,23 +155,23 @@ async fn collection_identity_and_last_launch_target_survive_same_ids_in_other_fo
     complete(&mut app, task).await;
     assert!(!app.resource_install.busy);
     let request = app.resource_install.request.as_ref().unwrap();
-    assert_eq!(request.root, other);
+    assert!(same_root(&request.root, &other));
     assert_eq!(request.instance, "versions/a");
     assert_eq!(app.resource_install.targets.len(), 4);
     let home = app
         .resource_install
         .targets
         .iter()
-        .find(|target| target.id == "versions/a" && target.root == fixture.root)
+        .find(|target| target.id == "versions/a" && same_root(&target.root, &fixture.root))
         .unwrap()
         .clone();
     let _ = app.update(Message::ResourceInstall(resource_install::Message::Target(
         home,
     )));
-    assert_eq!(
-        app.resource_install.request.as_ref().unwrap().root,
-        fixture.root
-    );
+    assert!(same_root(
+        &app.resource_install.request.as_ref().unwrap().root,
+        &fixture.root
+    ));
     let generation = app.resource_install.generation;
     let _ = app.update(Message::ResourceInstall(
         resource_install::Message::LastTargetLoaded(
@@ -183,10 +183,10 @@ async fn collection_identity_and_last_launch_target_survive_same_ids_in_other_fo
             Err("stale".into()),
         ),
     ));
-    assert_eq!(
-        app.resource_install.request.as_ref().unwrap().root,
-        fixture.root
-    );
+    assert!(same_root(
+        &app.resource_install.request.as_ref().unwrap().root,
+        &fixture.root
+    ));
     let mut records = State::load_from(fixture.path.clone());
     assert_eq!(records.home(&fixture.root), Some("versions/c"));
     assert_eq!(records.home(&other), None);
