@@ -125,6 +125,12 @@ pub enum Message {
     SwitchMode(LoginMode),
     DeviceCodeStarted(Result<DeviceCodeStart, String>),
     OpenBrowser(String),
+    ChooseSkin(String),
+    ResetSkin(String),
+    RefreshSkin(String),
+    SkinPreview(String, u64, crate::account_skin::Skin),
+    SkinLoaded(String, u64, Result<crate::account_skin::Skin, String>),
+    SkinChosen(String, u64, Result<Option<crate::account_skin::Skin>, String>),
     CopyText(String, &'static str),
     // 离线测试账户消息
     OfflineInput(String),
@@ -147,6 +153,9 @@ pub struct State {
     pub login_settings: LoginSettings,
     pub settings_notice: String,
     pub settings_saving: bool,
+    skins: std::collections::HashMap<String, crate::account_skin::Skin>,
+    skin_requests: std::collections::HashMap<String, u64>,
+    skin_generation: u64,
     config: Result<MicrosoftAuthConfig, String>,
     path: PathBuf,
     cancel: Arc<Notify>,
@@ -172,7 +181,7 @@ impl Default for State {
 }
 
 impl State {
-    fn from_directory(directory: PathBuf) -> Self {
+    pub(crate) fn from_directory(directory: PathBuf) -> Self {
         let (login_settings, config) =
             match read_login_settings(&directory.join("microsoft-login.json")) {
                 Ok(saved) => {
@@ -206,6 +215,9 @@ impl State {
             login_settings,
             settings_notice,
             settings_saving: false,
+            skins: std::collections::HashMap::new(),
+            skin_requests: std::collections::HashMap::new(),
+            skin_generation: 0,
             config,
             path: directory.join("accounts.json"),
             cancel: Arc::new(Notify::new()),
@@ -242,11 +254,11 @@ async fn write_index(path: &Path, index: AccountIndex) -> Result<AccountIndex, S
     let bytes = serde_json::to_vec_pretty(&index).map_err(|e| e.to_string())?;
     tokio::fs::create_dir_all(path.parent().ok_or("无效的账户存储路径")?)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("创建账户目录失败（{}）：{e}", path.display()))?;
     let temporary = path.with_extension("json.tmp");
     tokio::fs::write(&temporary, bytes)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("写入账户临时文件失败（{}）：{e}", temporary.display()))?;
     tokio::fs::rename(&temporary, path)
         .await
         .map_err(|e| format!("保存账户记录失败：{e}"))?;
@@ -254,6 +266,64 @@ async fn write_index(path: &Path, index: AccountIndex) -> Result<AccountIndex, S
 }
 
 impl State {
+    pub fn avatar(&self, account: &AuthAccount) -> iced::widget::image::Handle {
+        self.skins.get(&account.id).map(|skin| skin.avatar.clone()).unwrap_or_else(|| crate::account_skin::fallback(account))
+    }
+
+    pub fn skin_loading(&self, id: &str) -> bool {
+        self.skin_requests.contains_key(id)
+    }
+
+    pub fn custom_skin(&self, id: &str) -> bool {
+        self.skins.get(id).is_some_and(|skin| skin.custom)
+    }
+
+    pub fn skin_description(&self, account: &AuthAccount) -> String {
+        let skin = self.skins.get(&account.id).cloned().unwrap_or_else(|| crate::account_skin::Skin::default_for(account));
+        if self.skin_loading(&account.id) {
+            format!("{} · 正在读取皮肤…", skin.description)
+        } else if let Some(warning) = skin.warning {
+            format!("{} · {warning}", skin.description)
+        } else { skin.description }
+    }
+
+    fn skin_request(&mut self, id: &str) -> u64 {
+        self.skin_generation += 1;
+        self.skin_requests.insert(id.to_owned(), self.skin_generation);
+        self.skin_generation
+    }
+
+    fn load_avatar(&mut self, account: AuthAccount) -> Task<Message> {
+        let root = self.path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let generation = self.skin_request(&account.id);
+        Task::run(iced::stream::channel(2, move |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
+            use iced::futures::SinkExt;
+            if !account.is_offline() {
+                if let Ok(Some(skin)) = crate::account_skin::cached(&root, &account).await {
+                    let _ = output.send(Message::SkinPreview(account.id.clone(), generation, skin)).await;
+                }
+            }
+            let id = account.id.clone();
+            let result = crate::account_skin::load(root, account).await;
+            let _ = output.send(Message::SkinLoaded(id, generation, result)).await;
+        }), |message| message)
+    }
+
+    fn load_avatars(&mut self) -> Task<Message> {
+        self.skins.retain(|id, _| self.index.accounts.iter().any(|a| &a.id == id));
+        self.skin_requests.retain(|id, _| self.index.accounts.iter().any(|a| &a.id == id));
+        let accounts: Vec<_> = self.index.accounts.iter()
+            .filter(|a| !self.skins.contains_key(&a.id) && !self.skin_loading(&a.id)).cloned().collect();
+        Task::batch(accounts.into_iter().map(|account| self.load_avatar(account)).collect::<Vec<_>>())
+    }
+
+    pub fn retry_skins(&mut self) -> Task<Message> {
+        let accounts: Vec<_> = self.index.accounts.iter().filter(|a| {
+            !self.skin_loading(&a.id) && self.skins.get(&a.id).is_none_or(|skin| skin.warning.is_some())
+        }).cloned().collect();
+        Task::batch(accounts.into_iter().map(|account| self.load_avatar(account)).collect::<Vec<_>>())
+    }
+
     pub fn has_microsoft_app(&self) -> bool {
         self.config.is_ok()
     }
@@ -311,26 +381,43 @@ impl State {
                 let auth_url = login.authorization_url.clone();
                 self.auth_url = Some(auth_url.clone());
                 self.device_code = None;
-                self.notice = "等待浏览器授权完成（最长等待 3 分钟）…".into();
+                let (redirect, port) = match accounts_flow::callback_address(&config.redirect_uri) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        self.busy = false;
+                        self.logging_in = false;
+                        self.notice = error;
+                        return Task::none();
+                    }
+                };
+                let listener = match std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+                    .and_then(|listener| { listener.set_nonblocking(true)?; Ok(listener) }) {
+                    Ok(listener) => listener,
+                    Err(error) => {
+                        self.busy = false;
+                        self.logging_in = false;
+                        self.auth_url = None;
+                        self.notice = format!("无法监听登录回调端口 {port}：{error}");
+                        return Task::none();
+                    }
+                };
+                self.notice = match accounts_flow::open_browser(&auth_url) {
+                    Ok(()) => "等待浏览器授权完成（最长等待 3 分钟）…".into(),
+                    Err(error) => format!("{error}；请复制授权链接手动打开。"),
+                };
 
-                // 尝试自动调起默认浏览器
-                let _ = accounts_flow::open_browser(&auth_url);
-
+                let existing_accounts: Vec<String> = self.index.accounts.iter().map(|account| account.id.clone()).collect();
+                let expected_state = login.state.clone();
                 Task::perform(
                     async move {
-                        let (redirect, port) =
-                            accounts_flow::callback_address(&config.redirect_uri)?;
-                        let listener = tokio::net::TcpListener::bind((
-                            std::net::Ipv4Addr::LOCALHOST,
-                            port,
-                        ))
-                        .await
-                        .map_err(|e| format!("无法监听登录回调端口 {port}：{e}"))?;
+                        let listener = tokio::net::TcpListener::from_std(listener)
+                            .map_err(|e| format!("无法启用登录回调端口 {port}：{e}"))?;
 
                         tokio::select! {
                             res = async {
-                                let callback_url = accounts_flow::receive_callback(listener, &redirect, &login.state).await?;
-                                provider.complete_login(&login, &callback_url).await.map_err(|e| e.to_string())
+                                accounts_flow::receive_callback(listener, &redirect, &expected_state, &existing_accounts, |callback_url| async move {
+                                    provider.complete_login(&login, &callback_url).await.map_err(|e| e.to_string())
+                                }).await
                             } => res,
                             _ = cancel.notified() => Err("已取消登录".into()),
                         }
@@ -376,7 +463,66 @@ impl State {
                 return iced::clipboard::write(content);
             }
             Message::OpenBrowser(url) => {
-                let _ = accounts_flow::open_browser(&url);
+                if let Err(error) = accounts_flow::open_browser(&url) {
+                    self.notice = format!("{error}；请复制链接手动打开。");
+                }
+            }
+            Message::ChooseSkin(id) if !self.busy => {
+                let Some(account) = self.index.accounts.iter().find(|a| a.id == id && a.is_offline()).cloned() else { return Task::none(); };
+                let root = self.path.parent().unwrap_or(Path::new(".")).to_path_buf();
+                self.busy = true;
+                let generation = self.skin_request(&id);
+                return Task::perform(async move {
+                    let Some(file) = rfd::AsyncFileDialog::new().add_filter("Minecraft 皮肤 PNG", &["png"]).pick_file().await else { return Ok(None); };
+                    tokio::task::spawn_blocking(move || crate::account_skin::save_offline(&root, &account, file.path()).map(Some))
+                        .await.map_err(|e| e.to_string())?
+                }, move |result| Message::SkinChosen(id, generation, result));
+            }
+            Message::ResetSkin(id) if !self.busy => {
+                let Some(account) = self.index.accounts.iter().find(|a| a.id == id && a.is_offline()).cloned() else { return Task::none(); };
+                let root = self.path.parent().unwrap_or(Path::new(".")).to_path_buf();
+                self.busy = true;
+                let generation = self.skin_request(&id);
+                return Task::perform(async move { crate::account_skin::reset_offline(root, account).await.map(Some) },
+                    move |result| Message::SkinChosen(id, generation, result));
+            }
+            Message::RefreshSkin(id) if !self.busy => {
+                if let Some(account) = self.index.accounts.iter().find(|a| a.id == id).cloned() {
+                    if !self.skin_loading(&id) { return self.load_avatar(account); }
+                }
+            }
+            Message::SkinPreview(id, generation, skin) => {
+                if self.skin_requests.get(&id) == Some(&generation) { self.skins.insert(id, skin); }
+            }
+            Message::SkinLoaded(id, generation, result) => {
+                if self.skin_requests.get(&id) != Some(&generation) { return Task::none(); }
+                self.skin_requests.remove(&id);
+                match result {
+                    Ok(skin) => { self.skins.insert(id, skin); },
+                    Err(error) => {
+                        if let Some(account) = self.index.accounts.iter().find(|a| a.id == id) {
+                            let skin = self.skins.entry(id).or_insert_with(|| crate::account_skin::Skin::default_for(account));
+                            skin.warning = Some(error);
+                        }
+                    },
+                }
+            }
+            Message::SkinChosen(id, generation, result) => {
+                if self.skin_requests.get(&id) != Some(&generation) { return Task::none(); }
+                self.skin_requests.remove(&id);
+                self.busy = false;
+                match result {
+                    Ok(Some(skin)) => {
+                        self.notice = if skin.custom { "离线皮肤已保存；启动支持的游戏版本时自动应用。" } else { "已恢复按 UUID 自动选择的默认皮肤。" }.into();
+                        self.skins.insert(id, skin);
+                    }
+                    Ok(None) => {
+                        if let Some(account) = self.index.accounts.iter().find(|a| a.id == id).cloned() {
+                            return self.load_avatar(account);
+                        }
+                    }
+                    Err(error) => self.notice = format!("设置皮肤失败：{error}"),
+                }
             }
             Message::OfflineInput(val) => {
                 self.offline_input = val;
@@ -473,6 +619,7 @@ impl State {
                             .err()
                             .cloned()
                             .unwrap_or_else(|| "登录后可选择账户启动游戏。".into());
+                        return self.load_avatars();
                     }
                     Err(e) => self.notice = e,
                 }
@@ -493,7 +640,9 @@ impl State {
                         self.device_code = Some(start.clone());
                         self.notice = "请在浏览器打开验证网址并输入设备验证码。".into();
                         // 尝试自动打开验证网址
-                        let _ = accounts_flow::open_browser(&start.verification_uri);
+                        if let Err(error) = accounts_flow::open_browser(&start.verification_uri) {
+                            self.notice = format!("{error}；请手动打开验证网址。");
+                        }
 
                         let cancel = self.cancel.clone();
                         let provider = match &self.provider {
@@ -590,6 +739,7 @@ impl State {
                     Ok(index) => {
                         self.index = index;
                         self.notice = "账户记录已保存。".into();
+                        return self.load_avatars();
                     }
                     Err(e) => self.notice = e,
                 }
@@ -603,6 +753,32 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_skins_can_retry_and_late_loads_cannot_replace_a_chosen_skin() {
+        let mut state = State::from_directory(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));
+        let account = AuthAccount::offline("Player");
+        let id = account.id.clone();
+        let _ = state.update(Message::Loaded(Ok(AccountIndex { accounts: vec![account.clone()], active: Some(id.clone()) })));
+        let first = state.skin_requests[&id];
+        let _ = state.update(Message::SkinLoaded(id.clone(), first, Err("read failed".into())));
+        assert!(state.skin_description(&account).contains("read failed"));
+        assert!(state.retry_skins().units() > 0);
+        let previous = state.skin_requests[&id];
+        let _ = state.update(Message::ChooseSkin(id.clone()));
+        let chosen = state.skin_requests[&id];
+        let mut skin = crate::account_skin::Skin::default_for(&account);
+        skin.description = "chosen skin".into();
+        skin.custom = true;
+        let _ = state.update(Message::SkinChosen(id.clone(), chosen, Ok(Some(skin))));
+        let _ = state.update(Message::SkinLoaded(id.clone(), previous, Ok(crate::account_skin::Skin::default_for(&account))));
+        assert_eq!(state.skin_description(&account), "chosen skin");
+        assert!(state.custom_skin(&id));
+        assert!(!state.busy);
+        let _ = state.update(Message::Loaded(Ok(AccountIndex::default())));
+        let _ = state.update(Message::SkinLoaded(id.clone(), previous, Err("late".into())));
+        assert!(!state.skins.contains_key(&id));
+    }
 
     #[tokio::test]
     async fn saved_login_settings_survive_restart_and_immediately_configure_the_provider() {
@@ -774,7 +950,7 @@ mod tests {
                 let _ = state.update(message);
             }
         }
-        assert_eq!(state.name(), "Alex");
+        assert_eq!(state.name(), "Alex", "{}", state.notice);
         assert!(state.description().contains("离线"));
         assert!(state.index.current().unwrap().is_offline());
         let saved = read_index(directory.join("accounts.json")).await.unwrap();

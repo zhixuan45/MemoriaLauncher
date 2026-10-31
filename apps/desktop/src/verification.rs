@@ -54,6 +54,13 @@ fn delayed(message: Message) -> Task<Message> {
 }
 
 pub fn after_load(app: &mut Launcher) -> Task<Message> {
+    if std::env::args().any(|arg| arg == "--accounts") {
+        let capture = Task::perform(async {
+            tokio::time::sleep(Duration::from_secs(4)).await;
+            Message::Capture
+        }, |message| message);
+        return Task::batch([app.update(Message::Profile), capture]);
+    }
     if let Some(id) = argument("--project-menu") {
         let task = app.update(Message::ProjectMenu(crate::project_menu::Message::Open(id)));
         return Task::batch([task,delayed(Message::Capture)]);

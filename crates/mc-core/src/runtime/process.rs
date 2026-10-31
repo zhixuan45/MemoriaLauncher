@@ -60,7 +60,10 @@ impl GameProcess {
     }
 }
 
-pub(crate) async fn spawn(plan: LaunchPlan) -> LauncherResult<GameProcess> {
+pub(crate) async fn spawn<F>(plan: LaunchPlan, prepare: F) -> LauncherResult<GameProcess>
+where
+    F: FnOnce(&std::path::Path) -> LauncherResult<()> + Send + 'static,
+{
     // 再检查已有父目录，避免 prepare 与执行之间目录被替换为越界链接。
     super::layout::checked_join(&plan.game_directory, std::path::Path::new(".launcher"))?;
     super::layout::checked_join(
@@ -83,6 +86,10 @@ pub(crate) async fn spawn(plan: LaunchPlan) -> LauncherResult<GameProcess> {
     let native_path = plan.natives_directory.clone();
     let instance_lock = crate::service::instance_write::files::lock(&plan.game_directory)
         .map_err(|e| LauncherError::InvalidMetadata(e.to_string()))?;
+    let game_directory = plan.game_directory.clone();
+    tokio::task::spawn_blocking(move || prepare(&game_directory))
+        .await
+        .map_err(|e| LauncherError::Internal(e.to_string()))??;
     let archives = plan.natives;
     tokio::task::spawn_blocking(move || super::natives::extract(&archives, &native_path))
         .await
@@ -217,7 +224,7 @@ mod tests {
                 log_path: log_path.clone(),
                 natives: vec![],
                 secrets: vec!["secret-token".into()],
-            })
+            }, |_| Ok(()))
             .await
             .unwrap();
             assert!(crate::service::instance_write::files::lock(&directory).is_err());

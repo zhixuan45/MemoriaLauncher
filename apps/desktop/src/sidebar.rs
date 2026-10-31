@@ -317,7 +317,10 @@ pub fn view(app: &Launcher) -> Element<'_, Message> {
         container(
             button(
                 row![
-                    icon(Icon::Gamepad, GREEN, 24.),
+                    (|| -> Element<'_, Message> { if let Some(account) = app.accounts.index.current() {
+                        iced::widget::image::<iced::widget::image::Handle>(app.accounts.avatar(account)).width(32).height(32)
+                            .filter_method(iced::widget::image::FilterMethod::Nearest).into()
+                    } else { icon(Icon::Gamepad, GREEN, 24.).into() } })(),
                     column![
                         bold(app.accounts.name(), 12.),
                         label(app.accounts.description(), 9.).color(MUTED)

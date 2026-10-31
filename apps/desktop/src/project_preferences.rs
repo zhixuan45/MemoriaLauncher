@@ -145,7 +145,8 @@ impl State {
             return Ok(());
         };
         let parent = path.parent().ok_or("侧栏配置目录无效")?;
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("创建侧栏配置目录失败（{}）：{e}", parent.display()))?;
         let temporary = parent.join(format!("sidebar-{}.tmp", uuid::Uuid::new_v4()));
         let result = (|| {
             use std::io::Write;
@@ -163,7 +164,7 @@ impl State {
         if result.is_err() {
             let _ = fs::remove_file(temporary);
         }
-        result
+        result.map_err(|e| format!("保存侧栏配置失败（{}）：{e}", path.display()))
     }
 }
 fn valid_section(value: &str) -> bool {

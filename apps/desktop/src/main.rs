@@ -3,6 +3,9 @@
 
 mod accounts;
 mod accounts_flow;
+mod account_skin;
+mod default_skins;
+mod offline_skin_pack;
 mod ai;
 mod ai_settings;
 mod api_client;

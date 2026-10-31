@@ -15,6 +15,7 @@ url = "2.5"
 base64 = "0.22"
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "x11", "wayland", "image-without-codecs", "svg", "tokio", "advanced-shaping", "advanced"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+zip = { version = "6", default-features = false, features = ["deflate"] }
 rfd = { version = "0.14.1", default-features = false, features = ["xdg-portal", "tokio"] }
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
@@ -23,7 +24,6 @@ reqwest = { version = "0.13.3", default-features = false, features = ["json", "q
 [dev-dependencies]
 sha1 = "0.10"
 iced_test = "0.14"
-zip = { version = "6", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
 serde = { workspace = true }
@@ -31,5 +31,5 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_WindowsProgramming", "Win32_Graphics_Dwm"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_WindowsProgramming", "Win32_Graphics_Dwm", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 

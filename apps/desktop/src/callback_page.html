@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{TITLE}} · Memoria Launcher</title>
+<style>
+:root{color-scheme:dark;font-family:"Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;background:#0b1114;color:#edf3ef}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;position:relative;isolation:isolate;background:radial-gradient(ellipse at 50% 47%,#24312c 0%,#111a1c 43%,#090e11 100%)}
+body:before{content:"";position:fixed;inset:0;z-index:-2;background:linear-gradient(180deg,rgba(9,15,17,.55),rgba(9,15,17,.9)),url('data:image/png;base64,{{WALLPAPER}}') center top/cover no-repeat;opacity:.75}body:after{content:"";position:fixed;inset:0;z-index:-1;background:radial-gradient(ellipse at center,transparent 10%,rgba(5,10,12,.65) 100%)}
+.card{width:min(100%,480px);min-height:510px;padding:52px 32px 48px;text-align:center;border:1px solid rgba(181,208,190,.17);border-radius:20px;background:rgba(17,24,25,.82);box-shadow:0 24px 90px rgba(0,0,0,.32);backdrop-filter:blur(16px);display:flex;flex-direction:column;align-items:center}
+.mark{width:56px;height:48px;display:grid;place-items:center;filter:drop-shadow(0 0 16px rgba(133,205,148,.16))}.mark svg{width:100%;height:100%}.brand{font-size:19px;font-weight:700;letter-spacing:.28em;margin:18px 0 0;padding-left:.28em}.subbrand{font-size:10px;color:#83918a;letter-spacing:.42em;margin:6px 0 0;padding-left:.42em}.status{width:86px;height:86px;display:grid;place-items:center;border:3px solid #8dcf99;border-radius:50%;color:#a7e3b0;font-size:49px;font-family:system-ui,sans-serif;font-weight:400;line-height:1;margin-top:48px;box-shadow:0 0 34px rgba(131,210,145,.11)}.error .status{border-color:#d3a678;color:#e4bc91;box-shadow:0 0 34px rgba(211,166,120,.1)}h1{font-size:29px;font-weight:650;letter-spacing:.04em;margin:30px 0 12px}p{margin:0;color:#a2afaa;font-size:16px;line-height:1.7}.divider{width:34px;height:1px;background:#80bd8e;margin:30px auto 24px}.error .divider{background:#d3a678}.hint{font-size:14px;color:#81908a}@media(max-width:520px){.card{min-height:460px;padding:40px 22px}h1{font-size:25px}.status{margin-top:38px}}
+</style>
+</head>
+<body class="{{TONE}}">
+<main class="card">
+<div class="mark" aria-hidden="true"><svg viewBox="0 0 56 48" xmlns="http://www.w3.org/2000/svg"><path fill="#a2d6a4" d="M2 9 13 2l15 11v14L13 17v27L2 38z"/><path fill="#72b483" d="M28 13 43 2l11 7v29l-11 6V17L28 27z"/><path fill="#c1e5bd" d="m13 2 15 11L43 2 28 22z"/></svg></div>
+<div class="brand">MEMORIA</div><div class="subbrand">LAUNCHER</div>
+<div class="status" aria-hidden="true">{{ICON}}</div>
+<h1>{{TITLE}}</h1><p>{{DESCRIPTION}}</p><div class="divider"></div><p class="hint">{{HINT}}</p>
+</main>
+</body>
+</html>

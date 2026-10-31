@@ -303,7 +303,8 @@ pub fn launch(
     environment: Environment,
     downloads: mc_core::DownloadSettings,
     key: String,
-    account_id: String,
+    account: mc_core::AuthAccount,
+    mc_version: String,
     provider: crate::accounts::Provider,
 ) -> iced::Task<crate::app::Message> {
     use crate::app::Message;
@@ -338,16 +339,22 @@ pub fn launch(
                     options.java = java.executable.clone();
                     let launcher = GameLauncher::new(layout, Arc::new(provider));
                     launcher.repair_logging(&key, &mc_core::DownloadClient::new(downloads)?).await?;
-                    let process = launcher
-                        .prepare(&key, &account_id, options)
-                        .await?
-                        .spawn()
-                        .await?;
-                    Ok::<_, mc_core::LauncherError>((process, java))
+                    let plan = launcher.prepare(&key, &account.id, options).await?;
+                    let data_root = crate::accounts::data_dir();
+                    let warning = std::sync::Arc::new(std::sync::Mutex::new(None));
+                    let output_warning = warning.clone();
+                    let process = plan.spawn_with_preparation(move |directory| {
+                        let message = crate::offline_skin_pack::prepare(directory, &account, &data_root, &mc_version)
+                            .map_err(mc_core::LauncherError::InvalidMetadata)?;
+                        *output_warning.lock().map_err(|e| mc_core::LauncherError::Internal(e.to_string()))? = message;
+                        Ok(())
+                    }).await?;
+                    let warning = warning.lock().map_err(|e| mc_core::LauncherError::Internal(e.to_string()))?.take();
+                    Ok::<_, mc_core::LauncherError>((process, java, warning))
                 }
                 .await;
                 match result {
-                    Ok((process, java)) => {
+                    Ok((process, java, warning)) => {
                         let description = format!(
                             "游戏已启动（PID {}）· Java {}（{}），日志：{}",
                             process.id().unwrap_or_default(),
@@ -355,6 +362,7 @@ pub fn launch(
                             java.executable.display(),
                             process.log_path().display()
                         );
+                        let description = if let Some(warning) = warning { format!("{description}；{warning}") } else { description };
                         let _ = output.send(Message::GameStarted(description)).await;
                         let result = process
                             .wait()

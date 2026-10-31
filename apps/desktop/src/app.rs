@@ -451,12 +451,12 @@ impl Launcher {
                 {
                     return Task::none();
                 }
-                let key = match self.current() {
+                let (key, mc_version) = match self.current() {
                     Some(i) if !i.installed => {
                         self.status = "客户端 JAR 缺失，请先安装完整游戏。".into();
                         return Task::none();
                     }
-                    Some(i) => i.instance.id.clone(),
+                    Some(i) => (i.instance.id.clone(), i.instance.mc_version.clone()),
                     None => {
                         self.status =
                             "暂无可启动的实例，请在设置 → 游戏设置中检查实例集文件夹。".into();
@@ -496,7 +496,8 @@ impl Launcher {
                     self.environment.clone(),
                     self.download_settings.saved.clone(),
                     key,
-                    account.id.clone(),
+                    account.clone(),
+                    mc_version,
                     provider,
                 );
             }
@@ -548,7 +549,7 @@ impl Launcher {
                 }
             }
             Message::Accounts(message) => {
-                if self.launching {
+                if self.launching && !matches!(message, crate::accounts::Message::SkinLoaded(..) | crate::accounts::Message::SkinPreview(..) | crate::accounts::Message::SkinChosen(..)) {
                     return Task::none();
                 }
                 return self.accounts.update(message).map(Message::Accounts);
@@ -703,7 +704,10 @@ impl Launcher {
                 crate::selections::remember(self);
                 return iced::exit();
             }
-            Message::Profile => self.open_modal(Modal::Profile),
+            Message::Profile => {
+                self.open_modal(Modal::Profile);
+                return self.accounts.retry_skins().map(Message::Accounts);
+            }
             Message::LoginSettings => {
                 let _ = self.settings.update(
                     crate::settings::Message::Tab(crate::settings::LOGIN_TAB),

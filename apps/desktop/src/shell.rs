@@ -204,6 +204,7 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                 );
             }
 
+            content = content.push(label(&app.accounts.notice, 13.).color(MUTED));
             if !app.accounts.has_microsoft_app() {
                 content = content.push(
                     container(
@@ -228,7 +229,6 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                     .style(theme::panel),
                 );
             } else {
-                content = content.push(label(&app.accounts.notice, 13.).color(MUTED));
                 content = content.push(
                     button(label("配置 Microsoft 登录", 13.))
                         .style(theme::quiet)
@@ -387,18 +387,19 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                         Color::from_rgb(0.2, 0.75, 1.)
                     };
                     content = content.push(
-                        row![
+                        column![row![
+                            iced::widget::image::<iced::widget::image::Handle>(app.accounts.avatar(account)).width(36).height(36)
+                                .filter_method(iced::widget::image::FilterMethod::Nearest),
                             column![
                                 bold(&account.username, 18.),
-                                row![
-                                    label(tag_text, 11.).color(tag_color),
-                                    label("·", 11.).color(MUTED),
-                                    label(&account.uuid, 11.).color(MUTED),
-                                ]
-                                .spacing(6),
+                                label(tag_text, 11.).color(tag_color),
+                                label(&account.uuid, 10.).color(MUTED),
                             ]
                             .spacing(4)
                             .width(Fill),
+                        ].spacing(12).align_y(Alignment::Center),
+                        label(app.accounts.skin_description(account), 11.).color(MUTED),
+                        row![
                             button(label(
                                 if selected {
                                     "当前账户"
@@ -413,6 +414,20 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                                 )),
                             ))
                             .style(theme::quiet),
+                            (|| -> Element<'_, Message> { if is_offline {
+                                row![
+                                    button(label("设置皮肤", 12.))
+                                        .on_press_maybe((!app.accounts.busy && !app.launching).then(|| Message::Accounts(crate::accounts::Message::ChooseSkin(account.id.clone()))))
+                                        .style(theme::quiet),
+                                    button(label("恢复默认皮肤", 12.))
+                                        .on_press_maybe((!app.accounts.busy && !app.launching && app.accounts.custom_skin(&account.id)).then(|| Message::Accounts(crate::accounts::Message::ResetSkin(account.id.clone()))))
+                                        .style(theme::quiet),
+                                ].spacing(4).into()
+                            } else {
+                                button(label("刷新皮肤", 12.))
+                                    .on_press_maybe((!app.accounts.busy && !app.launching && !app.accounts.skin_loading(&account.id)).then(|| Message::Accounts(crate::accounts::Message::RefreshSkin(account.id.clone()))))
+                                    .style(theme::quiet).into()
+                            } })(),
                             button(label("退出登录", 12.))
                                 .on_press_maybe((!app.accounts.busy && !app.launching).then(|| {
                                     Message::Accounts(crate::accounts::Message::Remove(
@@ -421,12 +436,16 @@ fn modal_view(app: &Launcher, modal: Modal) -> Element<'_, Message> {
                                 }))
                                 .style(theme::quiet),
                         ]
-                        .spacing(8)
-                        .align_y(Alignment::Center),
+                        .spacing(8).align_y(Alignment::Center)]
+                        .spacing(8).width(Fill),
                     );
                 }
                 if app.accounts.index.accounts.is_empty() {
                     content = content.push(label("尚未添加账户", 17.));
+                }
+                if app.accounts.index.accounts.iter().any(|a| a.is_offline()) {
+                    content = content.push(label("离线账户自动按 UUID 选择默认皮肤，也可设置本地 PNG；重启后继续使用。", 11.).color(MUTED));
+                    content = content.push(label("游戏内皮肤要求 64×64 PNG，支持 1.20.1 / 1.21.1；相同默认皮肤的玩家也会受影响。", 11.).color(MUTED));
                 }
 
                 // 离线测试账户添加区域

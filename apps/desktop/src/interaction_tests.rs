@@ -7,6 +7,9 @@ use mc_core::{
     MockInstanceService, TaskService,
 };
 
+#[path = "account_skin_ui_tests.rs"]
+mod account_skins;
+
 fn simulator<'a>(
     app: &'a Launcher,
 ) -> Simulator<'a, Message, iced::Theme, crate::motion_renderer::Renderer> {

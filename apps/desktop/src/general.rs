@@ -175,12 +175,7 @@ pub fn open_directory(directory: &Path) -> Result<(), String> {
     let directory = std::path::absolute(directory).map_err(|e| e.to_string())?;
     #[cfg(windows)]
     {
-        // Explorer can keep running as the file-manager process. Do not wait for its window.
-        std::process::Command::new("explorer.exe")
-            .arg(&directory)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        return Ok(());
+        return shell_open(directory.as_os_str());
     }
     #[cfg(target_os = "macos")]
     let mut command = std::process::Command::new("open");
@@ -198,6 +193,33 @@ pub fn open_directory(directory: &Path) -> Result<(), String> {
                 Err(format!("文件管理器退出：{status}"))
             }
         })
+}
+
+#[cfg(windows)]
+pub fn shell_open(target: &std::ffi::OsStr) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let mut target: Vec<u16> = target.encode_wide().collect();
+    if target.contains(&0) {
+        return Err("打开目标包含无效的空字符。".into());
+    }
+    target.push(0);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    if result <= 32 {
+        return Err(format!("Windows Shell 无法打开目标（错误 {result}）。"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

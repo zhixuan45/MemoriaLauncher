@@ -78,7 +78,15 @@ impl LaunchPlan {
     }
 
     pub async fn spawn(self) -> LauncherResult<GameProcess> {
-        super::process::spawn(self).await
+        super::process::spawn(self, |_| Ok(())).await
+    }
+
+    /// Run a small instance preparation step while holding the game instance lock.
+    pub async fn spawn_with_preparation<F>(self, prepare: F) -> LauncherResult<GameProcess>
+    where
+        F: FnOnce(&Path) -> LauncherResult<()> + Send + 'static,
+    {
+        super::process::spawn(self, prepare).await
     }
 }
 
